@@ -445,25 +445,25 @@ Under D3 the ask is smaller than the previous revision's: consume `capture/contr
 
 ## Examples
 
-The Harbor path, end to end. `--llm-url` is required and has no default and no environment fallback, because an unset endpoint produces rollouts that look completely normal and carry no token ids.
+The Harbor path, end to end, on the [SmolDataEnvs](https://huggingface.co/collections/FineEnvs/smoldataenvs) datasets. `--llm-url` is required and has no default and no environment fallback, because an unset endpoint produces rollouts that look completely normal and carry no token ids.
 
 ```bash
 LLM=http://127.0.0.1:8000/v1
 
 # What can this machine actually run? Read-only, boots nothing.
 openenv harbor info --llm-url $LLM \
-  --dataset AdithyaSK/data_agent_rl_environment_train,AdithyaSK/data_agent_rl_environment_eval
+  --dataset FineEnvs/SmolDataEnvs-harbor-train,FineEnvs/SmolDataEnvs-harbor-eval
 
 # Rollouts with no env server involved — also the debugging path:
 # if this works and `serve` does not, the fault is in the serving layer.
 openenv harbor rollout --llm-url $LLM \
-  --dataset AdithyaSK/data_agent_rl_environment_train \
+  --dataset FineEnvs/SmolDataEnvs-harbor-train \
   --task-index 0 -n 5 --harness opencode --sandbox modal
 
 # The env server: Task API for discovery, one long-running run_rollout MCP tool, and a web UI.
 # Refuses to start if the LLM is unreachable; one that answers without token ids serves eval only.
 openenv harbor serve --llm-url $LLM \
-  --dataset AdithyaSK/data_agent_rl_environment_train,AdithyaSK/data_agent_rl_environment_eval
+  --dataset FineEnvs/SmolDataEnvs-harbor-train,FineEnvs/SmolDataEnvs-harbor-eval
 ```
 
 Training against the merged TRL path (lives in `examples/`, never as infrastructure in `envs/`):
