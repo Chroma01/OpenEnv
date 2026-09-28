@@ -2,7 +2,7 @@
 
 **Status**: In Review
 **Created**: 2026-07-11
-**Revised**: 2026-08-12 — rescoped against [#1036](https://github.com/huggingface/OpenEnv/pull/1036)
+**Revised**: 2026-08-12 — rescoped against [#1036](https://github.com/huggingface/OpenEnv/pull/1036); 2026-09-28 — reconciled with merged #1036 and [RFC 012](./012-harbor-capture-providers.md)
 **Authors**: @rycerzes, @sergiopaniego
 **RFC ID**: 006
 
@@ -25,9 +25,21 @@ So this document is no longer a proposal for a component. It is **the design rat
 
 Each is discussed in place below. The rest of the RFC — the ownership boundary with TRL, the failure modes it exists to prevent, and the reference-implementation evidence — stands.
 
+### Reconciliation with RFC 012
+
+#1036 merged on 2026-09-16 together with [RFC 012](./012-harbor-capture-providers.md), which extends this RFC and explicitly changes D2. This revision adopts that change rather than contradicting it:
+
+| | This RFC before | After RFC 012 |
+|---|---|---|
+| **D2** external providers | never relayed to | supported for **evaluation** (`purpose="eval"`, `provider` ∈ `openai` / `anthropic` / `hf` / `vllm`); training still requires engine token capture |
+| **D2** startup | `openenv harbor serve` refuses an endpoint below `tokens` | only an **unreachable** endpoint is fatal; a reachable one without token ids runs as an eval backend, stamped on `/health` and every result, and never yields a training contract |
+| **D3** sampling | harness knobs neutralised silently, with a finding | training distribution is an explicit, validated `sampling` policy; a changed effective policy is fatal |
+| **D13** budgets | open | per-session model-call budget and output-token cap enforced |
+| **D16** reader | `capture/contract.py` converters | `openenv.harbor.contract` is the authoritative Harbor reader; `capture/contract.py` stays the harness-agnostic layer |
+
 ### What is still true
 
-OpenEnv fronts a trainer-controlled engine and never relays to an external provider (D2). Rewards come from the environment (D7). Weight sync, advantages and importance-sampling correction stay TRL's (D12). The trace is consumed by TRL through the **loop-owning path of `AsyncGRPOTrainer`**: a `HarnessRolloutWorker` ([trl#6420](https://github.com/huggingface/trl/pull/6420), merged) drives an OpenEnv session factory and reconciles the trace into training rows. This is the **installed-agent** training path — the counterpart to the external-agent pattern TRL's Harbor integration already covers, where installed CLI agents cannot be trained because the trainer does not own tokens and logprobs.
+For training, OpenEnv fronts a trainer-controlled engine and records its canonical token ids (D2); hosted providers serve evaluation only. Rewards come from the environment (D7). Weight sync, advantages and importance-sampling correction stay TRL's (D12). The trace is consumed by TRL through the **loop-owning path of `AsyncGRPOTrainer`**: a `HarnessRolloutWorker` ([trl#6420](https://github.com/huggingface/trl/pull/6420), merged) drives an OpenEnv session factory and reconciles the trace into training rows. This is the **installed-agent** training path — the counterpart to the external-agent pattern TRL's Harbor integration already covers, where installed CLI agents cannot be trained because the trainer does not own tokens and logprobs.
 
 The design is checked against independent implementations of the same pattern — NVIDIA Polar/ProRL, Prime Intellect verifiers, TRL itself, plus AReaL, Agent Lightning and rLLM.
 
@@ -67,7 +79,7 @@ Two failure modes are established in the literature and were present in the prio
 1. Give `AsyncGRPOTrainer`'s loop-owning path a core capture layer to consume, replacing the per-env in-sandbox proxy. **(#1036 — built; consolidation outstanding.)**
 2. Guarantee token fidelity as an OpenEnv-enforced property, not a hope about the trainer: record generation-time prompt **and** completion ids so no reconstruction step is needed downstream. **(#1036 — built.)**
 3. Keep a clean ownership boundary with TRL, and keep `openenv.core` free of both trainer imports and a tokenizer dependency. **(#1036 — held; see D3.)**
-4. Front any trainer-controlled OpenAI-compatible engine; never relay to an external provider. **(#1036 — built, with graded degradation to eval.)**
+4. Train only against a trainer-controlled engine that returns token ids; allow hosted providers for evaluation, never for training. **(#1036 + RFC 012 — built, with graded degradation to eval.)**
 5. Work unchanged for local-subprocess and network-isolated remote sandboxes. **(#1036 — built; see D18.)**
 6. Turn `run_white_box` into a working seam for opaque CLI harnesses (secondary mode). **(open.)**
 
@@ -198,7 +210,9 @@ Rows are **labelled, never filtered**. A caller that silently drops rows cannot 
 
 **D1 — Token-level contract, not a message-level seam.** Return `(input_ids, loss_mask, logprobs, reward)` per sample. *Rationale:* token fidelity becomes an enforced guarantee. *Trade-off:* richer than a message log, but the message record is kept alongside (D15). Supersedes draft [#864](https://github.com/huggingface/OpenEnv/pull/864)'s message-level `RolloutMessages` design.
 
-**D2 — Trainer owns generation; the proxy re-generates, never relays.** The capture proxy fronts a trainer-controlled vLLM with `return_token_ids` and logprobs at generation time. *Rationale:* a relay to an external provider has no token identity and uses the provider's logprobs. *Trade-off:* requires a trainer-controlled engine; that is the point.
+**D2 — For training, the trainer owns generation; a hosted provider is an eval backend.** The capture proxy fronts a trainer-controlled vLLM with `return_token_ids` and logprobs at generation time. *Rationale:* a relay to an external provider has no token identity and uses the provider's logprobs, so it can never produce a training row. *Trade-off:* training requires a trainer-controlled engine; that is the point.
+
+*Amended by RFC 012.* The previous revision also refused to relay for evaluation. RFC 012 separates the two: `purpose` is `eval`, `train` or legacy `auto`, and the upstream descriptor names a `provider` (`openai`, `anthropic`, `hf`, `vllm`). An explicit evaluation stays evaluation even if its endpoint exposes tokens, and training export rejects it; an explicit training run fails before sandbox allocation when the endpoint cannot supply engine token capture. The training invariant is unchanged — what changed is that evaluation no longer has to pretend to be training to run at all.
 
 *Settled by #1036:* the degradation is **graded and named**, not binary. `capture/upstream.py` defines three `CAPTURE_LEVELS`:
 
@@ -208,7 +222,7 @@ Rows are **labelled, never filtered**. A caller that silently drops rows cannot 
 | `logprobs` | `logprobs`, `top_logprobs` | confidence readout, not trainable |
 | `text` | nothing | trace only; current OpenAI models 400 on `logprobs`, and a rejected request loses the agent's turn entirely |
 
-`capture/validate_llm.py` certifies the endpoint **before a sandbox is spent** and `openenv harbor serve` refuses to start below `tokens`. The document carries `capture_level` and `rollout_type` so a consumer never has to infer why `sequences` is empty, and `contract.py` raises rather than returning a well-formed empty contract from an eval rollout.
+`capture/validate_llm.py` certifies the endpoint **before a sandbox is spent**. `openenv harbor serve` treats only an *unreachable* endpoint as fatal (`harbor/startup.py`): refusing everything below `tokens` would rule out every hosted provider, so a reachable endpoint without token ids is served as an eval backend, with its level stamped on the capabilities report, `/health` and every result. The document carries `capture_level` and `rollout_type` so a consumer never has to infer why `sequences` is empty, and `contract.py` raises rather than returning a well-formed empty contract from an eval rollout.
 
 **D3 — OpenEnv records canonical ids, assembles without a tokenizer, and renders no chat template.** The proxy injects `return_token_ids` into every forwarded call and records what the engine reports: canonical `prompt_token_ids` (input ids *after* the engine's chat-template processing), the sampled `token_ids`, and their real logprobs. It **imports no tokenizer and renders no chat template**. It *does* assemble those records into training rows.
 
@@ -225,6 +239,8 @@ What actually decides placement is **where the information is**. The structure a
 *Residual obligation.* Recording canonical ids is faithful only if the engine that served the harness rendered with the same template the trainer trains under. TRL substitutes one when the model's own template is not prefix-preserving. **Still open** — the served-template hash and mismatch check (D11) are not in #1036.
 
 *A hazard #1036 found that this RFC had not anticipated.* `--logprobs-mode processed_logprobs` applies `log_softmax` *after* every logit processor, so a harness sampling with `top_p<1`, `top_k` or a repetition penalty yields logprobs over a truncated, renormalised distribution — while a trainer recomputing over the full vocabulary gets different numbers for the same tokens. Neither side is wrong; they answer different questions, and the mismatch is invisible. `upstream.py` therefore sends the distribution-narrowing knobs at their **no-op values** at `tokens` level, records what the harness actually asked for on the node, and emits a `sampling_neutralised` finding. At `logprobs`/`text` they are passed through, because an eval should score the model the harness asked for. Measured on vLLM 0.25.1, same prompt and token at temperature 0.7: `-1.3292` with both flags, `-1.2546` without — both plausible, both aligned, one wrong.
+
+*Made explicit by RFC 012.* For `purpose="train"` the caller states the training distribution as a `sampling` policy, validated before sandbox allocation: positive finite temperature, full-vocabulary sampling, neutral unsupported penalties. Capture stores the requested and submitted policies separately, and a changed effective training policy is fatal rather than a finding. `eval_sampling` is a validated override available only to explicit evaluation.
 
 **D4 — Calls form a graph, linked by prompt+completion prefix; a break opens a new root.**
 
@@ -267,7 +283,7 @@ flowchart TD
 
 *Strengthened by #1036, in a direction this RFC did not specify.* `sequence_for` enforces a second invariant: **a turn whose logprobs are missing or misaligned contributes its tokens as context (mask 0), never as targets.** A trainable token without a real behaviour-policy logprob would make GRPO's importance ratio `exp(new − old)` a ratio against a number we invented. The tokens are still real context for later turns, so they are kept — masked, not dropped.
 
-**D10 — δ diagnostics as a standard trace metric.** Per-token δ = |log π_train − log π_rollout| (max and mean). *Rationale:* KL alone misses early collapse (TIM). **Partially open.** #1036 ships [`scripts/logprob_parity.py`](https://github.com/huggingface/OpenEnv/pull/1036/files), which checks captured logprobs against engine rescoring and measures the top_p truncation bias — the right measurement, as a script rather than a trace field.
+**D10 — δ diagnostics as a standard trace metric.** Per-token δ = |log π_train − log π_rollout| (max and mean). *Rationale:* KL alone misses early collapse (TIM). **Partially open.** #1036 ships [`scripts/logprob_parity.py`](../scripts/logprob_parity.py), which checks captured logprobs against engine rescoring and measures the top_p truncation bias — the right measurement, as a script rather than a trace field.
 
 **D11 — Provenance in traces.** Record sampling params, engine/harness versions, and **hashes of the agent's config files** per call. *Rationale:* a sandboxed agent can rewrite its own prompts mid-episode ([arXiv:2607.03935](https://arxiv.org/abs/2607.03935)) and the reported score is always model-plus-harness ([arXiv:2605.26112](https://arxiv.org/abs/2605.26112)). **Partially open:** #1036 records `sampling_params` per turn — for a sharper reason than this RFC gave, see D3 — plus `finish_reason`, `harness_session_id` and `model`. Config-file hashing and the served-template hash are not implemented.
 
@@ -275,7 +291,7 @@ flowchart TD
 
 OpenEnv asks for no new fencing primitive. Its obligations are complementary: (a) a harness call in flight across a pause must block until resume or fail retryably (D14) rather than surfacing a torn generation; (b) each recorded call carries the policy version that served it, so a trace spanning a sync is detectable rather than silently mixed; (c) the proxy is colocated with the trainer (D18) so pause/resume stays a localhost concern. **(b) is open** — no policy-version field exists yet.
 
-**D13 — Proxy-enforced rollout budgets.** Check max turns / tokens / wall-clock *before* serving each turn, recording the cap as the stop condition — a black-box harness never stops on its own. **Open.** #1036 has the observability half (`GET /sessions` reports per-session turn count, root count and idle seconds) but no enforcement.
+**D13 — Proxy-enforced rollout budgets.** Check max turns / tokens / wall-clock *before* serving each turn, recording the cap as the stop condition — a black-box harness never stops on its own. **Partially settled.** A session's `max_model_calls` budget is enforced in `capture/server.py`: once it is spent, the proxy answers with a stop message the harness terminates on cleanly. That reply returns before ingest, so no turn the model did not generate can enter training data, and `budget_stop_count` is recorded so `degenerate_rollout` does not misread a budget-ended rollout. RFC 012 adds a per-session `metadata["max_output_tokens"]`, capped at the server limit. `GET /sessions` reports per-session turn count, root count and idle seconds. Aggregate token and wall-clock budgets are not enforced at the proxy.
 
 **D14 — Error relay semantics.** Map engine failures to status codes the agent SDK handles; stash the original error so the rollout reports the real cause. **Partially settled:** #1036 adds provider-400 auto-fixes (`install_fixes.py`), an `upstream_errors` counter per session, and a rule this RFC should have stated — **ingest never raises.** A capture problem degrades one turn, not a rollout, and never the server multiplexing every other rollout. A 200 with no choices is explicitly *not* recorded as a turn, because doing so inflated `n_roots` and could push a worthless rollout past the `degenerate_rollout` check that exists to catch it.
 
@@ -288,6 +304,8 @@ OpenEnv asks for no new fencing primitive. Its obligations are complementary: (a
 - `positive_logprob` / `masked_has_logprob` — a context position carrying a logprob means context was scored; a trainable position without one means a target was invented. Silent corruption in opposite directions.
 
 **D16 — OpenEnv owns and exports the contract.** *Reshaped by #1036.* Rather than OpenEnv declaring `TraceEntry` for TRL to import, `capture/contract.py` ships **converters** into the consumer's shape (`to_trace_entries` → TRL's `TraceEntry`; `to_turn_records`), and refuses to build one from an eval rollout. This is the better factoring: it decouples OpenEnv's record shape from any one trainer's, and it lets the converter apply the graph's knowledge — auxiliary roots and discarded retries are excluded *before* TRL sees them, so `agent_turn_fn` is not needed on this path. The `TODO(@openenv)` markers in TRL at `openenv_harness.py:44` and `:53` are still open; the resolution is now "import the converter", not "import the type".
+
+*Refined by RFC 012.* On the Harbor path, `openenv.harbor.contract.to_trace_entries` is the authoritative reader and `export_training_contract` (schema version 1) its downloadable form; the environment wrapper and the UI both use them, so consumer and audit share one validator and one mask semantics. `capture/contract.py` remains the harness-agnostic converter layer beneath it.
 
 **D17 — Roles are assigned structurally, not heuristically; the trainer keeps the policy.**
 
@@ -380,11 +398,14 @@ RFC 005 owns the wrapping pattern, MCP injection, session isolation and episode 
 
 ## Implementation status
 
-Landed in [#1036](https://github.com/huggingface/OpenEnv/pull/1036):
+Landed in [#1036](https://github.com/huggingface/OpenEnv/pull/1036) (merged 2026-09-16), with the RFC 012 amendments:
 
 | Item | Where |
 |---|---|
 | Capture proxy, session-as-API-key auth (D5) | `core/harness/capture/server.py`, `sessions.py` |
+| Eval/train purpose, provider descriptor, training sampling policy (D2, D3; RFC 012) | `capture/providers.py`, `capture/upstream.py`, `harbor/rollout.py` |
+| Startup endpoint probe: unreachable is fatal, no-token-ids is eval-only (D2) | `harbor/startup.py` |
+| Model-call budget and per-session output cap (D13) | `capture/sessions.py`, `capture/server.py` |
 | Four-dialect detection + translation (D19) | `capture/detection.py`, `capture/dialects/` |
 | Canonical id recording, sampling neutralisation (D3) | `capture/upstream.py` |
 | Rollout graph, prefix linking, discard detection (D4) | `capture/graph.py` |
@@ -393,7 +414,7 @@ Landed in [#1036](https://github.com/huggingface/OpenEnv/pull/1036):
 | Endpoint certification before a rollout is spent (D2) | `capture/validate_llm.py` |
 | Synthetic SSE replay (D6) | `capture/sse.py` |
 | PortForwarder strategies (D18) | `capture/forwarding.py` |
-| Consumer converters (D16) | `capture/contract.py` |
+| Consumer converters (D16) | `capture/contract.py`; authoritative Harbor reader and export in `harbor/contract.py` |
 | ATIF reconciliation, aux demotion, merge (D17) | `harbor/atif.py` |
 | Reward-key resolution, `None` ≠ 0 (D7) | `harbor/models.py`, `harbor/rollout.py` |
 | δ measurement as a script (D10) | `scripts/logprob_parity.py` |
@@ -408,11 +429,11 @@ Landed in [#1036](https://github.com/huggingface/OpenEnv/pull/1036):
 | Served-template hash in provenance + mismatch check | D3, D11 | the one remaining fidelity assertion; not an assembly job |
 | Config-file hashing per call | D11 | agents can rewrite their own prompts mid-episode |
 | Policy version / step on each recorded call | D12 | makes a trace spanning a weight sync detectable |
-| Proxy-enforced turn / token / wall-clock budgets | D13 | observability exists, enforcement does not |
+| Proxy-enforced aggregate token / wall-clock budgets | D13 | model-call budget and per-session output cap are enforced; totals are not |
 | δ as a trace field rather than a script | D10 | |
 | `CLIHarnessAdapter.run_white_box` | D8, Goal 6 | still `NotImplementedError` |
 | Async harness layer | — | `TODO(@openenv)` in TRL; performance, not correctness |
-| Eval-path role assignment: roots with empty `prompt_ids` all group under one key | D4, D17 | `discarded_nodes()` mislabels auxiliary conversations as discarded when no token ids exist; fix identified, landing separately |
+| Eval-path role assignment: roots with empty `prompt_ids` all group under one key | D4, D17 | `discarded_nodes()` mislabels auxiliary conversations as discarded when no token ids exist; fix identified, not yet on main |
 
 ### The TRL-side ask
 
@@ -440,7 +461,7 @@ openenv harbor rollout --llm-url $LLM \
   --task-index 0 -n 5 --harness opencode --sandbox modal
 
 # The env server: Task API for discovery, one long-running run_rollout MCP tool, and a web UI.
-# Refuses to start if the LLM cannot return token ids.
+# Refuses to start if the LLM is unreachable; one that answers without token ids serves eval only.
 openenv harbor serve --llm-url $LLM \
   --dataset AdithyaSK/data_agent_rl_environment_train,AdithyaSK/data_agent_rl_environment_eval
 ```
@@ -470,8 +491,9 @@ Property tests runnable without GPUs, none of which need a tokenizer in core: ca
 ## References
 
 ### OpenEnv seams and prior art
-- **PR [#1036](https://github.com/huggingface/OpenEnv/pull/1036) — the implementation this revision is written against**: `src/openenv/core/harness/capture/` (proxy, graph, export, contract, validation, dialects, forwarding), `src/openenv/harbor/` (seams, tasks, rollout, ATIF, serving, UI), `envs/harbor_env/`, `openenv harbor` CLI
-- RFC 005 — Agentic Harness Integration: [`rfcs/005-agentic-harnesses.md`](./005-agentic-harnesses.md); runtime in [`src/openenv/core/harness/__init__.py`](../src/openenv/core/harness/__init__.py), landed via [#652](https://github.com/huggingface/OpenEnv/pull/652)/[#903](https://github.com/huggingface/OpenEnv/pull/903)
+- **PR [#1036](https://github.com/huggingface/OpenEnv/pull/1036) — the implementation this revision is written against** (merged 2026-09-16): `src/openenv/core/harness/capture/` (proxy, graph, export, contract, validation, dialects, forwarding, providers), `src/openenv/harbor/` (seams, tasks, rollout, contract, ATIF, startup, serving, UI), `envs/harbor_env/`, `openenv harbor` CLI
+- **RFC 012** — Harbor capture purpose, provider fidelity and live-session ownership: [`rfcs/012-harbor-capture-providers.md`](./012-harbor-capture-providers.md); extends this RFC and amends D2
+- RFC 005 — Agentic Harness Integration: [`rfcs/005-agentic-harnesses.md`](./005-agentic-harnesses.md); runtime in [`src/openenv/core/harness/rollout.py`](../src/openenv/core/harness/rollout.py) (split into a package by [#1097](https://github.com/huggingface/OpenEnv/pull/1097)), landed via [#652](https://github.com/huggingface/OpenEnv/pull/652)/[#903](https://github.com/huggingface/OpenEnv/pull/903)
 - Tracking issue [#940](https://github.com/huggingface/OpenEnv/issues/940)
 - Existing in-sandbox proxy: [`envs/opencode_env/sandbox/interception.py`](../envs/opencode_env/sandbox/interception.py); second consumer [`envs/pi_env/harness.py`](../envs/pi_env/harness.py) ([#999](https://github.com/huggingface/OpenEnv/pull/999))
 - Tutorials documenting the in-sandbox path: [`docs/source/tutorials/opencode-agent-grpo.md`](../docs/source/tutorials/opencode-agent-grpo.md) ([#1028](https://github.com/huggingface/OpenEnv/pull/1028)), [`pi-agent-grpo.md`](../docs/source/tutorials/pi-agent-grpo.md) ([#1023](https://github.com/huggingface/OpenEnv/pull/1023))
