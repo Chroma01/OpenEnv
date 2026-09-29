@@ -61,21 +61,28 @@ _VALIDATE_TASKS = os.environ.get("OPENENV_VALIDATE_TASKS", "").lower() in (
 )
 
 
+_MAX_TASK_DEPTH = 6
+
+
 def _nested_task_dirs(base: Path) -> list[Path]:
     """Every folder under `base` holding a `task.toml`, by relative path; a task's own subfolders
-    are not searched."""
+    are not searched.
+
+    A symlinked folder is not followed: it can point outside the dataset, or back into it, which
+    would recurse until the thread dies. Neither is anything deeper than `_MAX_TASK_DEPTH` levels.
+    """
     found: list[Path] = []
 
-    def walk(folder: Path) -> None:
+    def walk(folder: Path, depth: int) -> None:
         for p in sorted(folder.iterdir()):
-            if not p.is_dir() or p.name.startswith("."):
+            if p.name.startswith(".") or p.is_symlink() or not p.is_dir():
                 continue
             if (p / "task.toml").is_file():
                 found.append(p)
-            else:
-                walk(p)
+            elif depth < _MAX_TASK_DEPTH:
+                walk(p, depth + 1)
 
-    walk(base)
+    walk(base, 1)
     return found
 
 

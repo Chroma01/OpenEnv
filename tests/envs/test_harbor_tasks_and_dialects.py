@@ -129,6 +129,18 @@ def test_a_flat_folder_without_task_toml_does_not_trigger_the_nested_search(tmp_
     ]
 
 
+def test_a_grouped_layout_does_not_follow_symlinks(tmp_path):
+    """A symlinked folder can point outside the dataset, or back into it (a loop); neither is walked."""
+    (tmp_path / "tasks" / "group" / "a").mkdir(parents=True)
+    (tmp_path / "tasks" / "group" / "a" / "task.toml").write_text("")
+    (tmp_path / "outside" / "b").mkdir(parents=True)
+    (tmp_path / "outside" / "b" / "task.toml").write_text("")
+    (tmp_path / "tasks" / "linked").symlink_to(tmp_path / "outside")
+    (tmp_path / "tasks" / "group" / "loop").symlink_to(tmp_path / "tasks")
+    found = tasks._task_dirs_from_directory(tmp_path)
+    assert [p.relative_to(tmp_path).as_posix() for p in found] == ["tasks/group/a"]
+
+
 def test_discovery_does_not_validate_by_default(tmp_path):
     """Validation costs a file read per task, and discovery is on every /splits call.
 
