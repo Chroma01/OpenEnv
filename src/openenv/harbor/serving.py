@@ -325,6 +325,11 @@ def build_app(
         app.mount(CAPTURE_MOUNT, service.capture.app)
 
     _attach_hf_login(app)
+    # Every UI handler that changes something (a rollout, an added dataset) is a POST under /web,
+    # and Gradio accepts those from any origin. Without this, any page a visitor opens could make
+    # their browser start rollouts on this server's endpoint, or reach a server on their own machine
+    # that the page itself cannot. Nothing a real visitor does is cross-site.
+    app.add_middleware(SameOrigin)
     return app
 
 
@@ -335,8 +340,8 @@ def _attach_hf_login(app: Any) -> bool:
     the callback URL it registers assume the site root. Gradio then hands the signed-in visitor's
     token to any UI handler that asks for a `gr.OAuthToken`, through the session cookie set here.
 
-    A cookie that identifies the visitor makes another website's request count as theirs, and
-    Gradio accepts requests from any origin, so a same-origin check comes with it.
+    A cookie that identifies the visitor makes another website's request count as theirs; the
+    same-origin check `build_app` installs for the UI covers that too.
     """
     from .ui_settings import load
 
@@ -358,34 +363,38 @@ def _attach_hf_login(app: Any) -> bool:
     except (ImportError, ValueError) as exc:
         print(f"hf login  off: {exc}")
         return False
-    app.add_middleware(SameOrigin)
     print("hf login  on (Inference Providers with the visitor's own account)")
     return True
 
 
 class SameOrigin:
-    """Refuse a state-changing request that a browser made from another site.
+    """Refuse a state-changing request to the UI that a browser made from another site.
 
     Browsers label every request they make (`Sec-Fetch-Site`, `Origin`); servers calling this app,
     such as a sandbox reaching the capture proxy or a trainer on the Task API, send neither and pass.
+    Only the UI (`/web`) is guarded: the Task API and MCP carry no visitor state, and browser tools
+    such as the MCP Inspector call them from another origin on purpose.
     """
 
-    def __init__(self, app: Any) -> None:
+    def __init__(self, app: Any, prefix: str = "/web") -> None:
         self.app = app
+        self.prefix = prefix
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
-        if scope.get("type") == "http" and scope.get("method") not in (
-            "GET",
-            "HEAD",
-            "OPTIONS",
+        path = scope.get("path") or ""
+        if (
+            scope.get("type") == "http"
+            and scope.get("method") not in ("GET", "HEAD", "OPTIONS")
+            and (path == self.prefix or path.startswith(self.prefix + "/"))
         ):
             headers = {
                 k.decode().lower(): v.decode() for k, v in scope.get("headers") or []
             }
             site = headers.get("sec-fetch-site", "")
             origin = headers.get("origin", "")
+            hosts = (headers.get("host", ""), headers.get("x-forwarded-host", ""))
             if site == "cross-site" or (
-                origin and not _same_host(origin, headers.get("host", ""))
+                origin and not any(_same_host(origin, h) for h in hosts if h)
             ):
                 from starlette.responses import PlainTextResponse
 

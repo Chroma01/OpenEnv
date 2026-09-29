@@ -326,6 +326,8 @@ What the UI guarantees whatever the settings:
   the page; a file path cannot leave its task directory.
 - A task from a dataset added from the page may not read the server's environment variables
   (`${VAR}` in `task.toml` or a compose file), which is where the server's keys are.
+- A request that changes something in the UI (a rollout, an added dataset) is refused when a
+  browser sends it from another site, so another page can't act through a visitor's browser.
 - Everything a model, a task or a tool produced is escaped before it is shown.
 
 ## CLI reference
@@ -599,8 +601,7 @@ restarts; removing it deletes it from the bucket.
 **Visitors can sign in with Hugging Face.** `push` turns on OAuth for the Space (`hf_oauth: true`,
 scope `inference-api`), and the UI offers "sign in with Hugging Face" as a way to use Inference
 Providers on the visitor's own account instead of pasting a token. It is optional and not needed
-for anything else; `--no-hf-login` leaves it out. With sign-in on, the server refuses state-changing
-requests that a browser makes from another site.
+for anything else; `--no-hf-login` leaves it out.
 
 **Rollouts on a Space use the Space's credentials for sandboxes.** An `hf-sandbox` rollout is billed
 to the `HF_TOKEN` the Space holds, whoever started it. `--no-rollouts` makes a public deployment a

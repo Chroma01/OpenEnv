@@ -670,11 +670,11 @@ def test_a_cross_site_request_is_refused_and_others_pass():
     async def receive():
         return {"type": "http.request"}
 
-    def request(method, **headers):
+    def request(method, path="/web/gradio_api/queue/join", **headers):
         return {
             "type": "http",
             "method": method,
-            "path": "/web/gradio_api/queue/join",
+            "path": path,
             "headers": [
                 (k.replace("_", "-").encode(), v.encode()) for k, v in headers.items()
             ],
@@ -714,6 +714,59 @@ def test_a_cross_site_request_is_refused_and_others_pass():
         )
     )
     assert len(calls) == 3
+    # the Task API and MCP are not the UI: browser tools call them from other origins on purpose
+    asyncio.run(
+        guard(
+            request(
+                "POST", path="/mcp", host="localhost:8000", sec_fetch_site="cross-site"
+            ),
+            receive,
+            send,
+        )
+    )
+    # behind a proxy that rewrites Host, the page's own origin arrives as X-Forwarded-Host
+    asyncio.run(
+        guard(
+            request(
+                "POST",
+                host="10.0.0.5:8000",
+                x_forwarded_host="harbor.example.org",
+                origin="https://harbor.example.org",
+            ),
+            receive,
+            send,
+        )
+    )
+    assert len(calls) == 5
+    asyncio.run(
+        guard(
+            request(
+                "POST",
+                host="10.0.0.5:8000",
+                x_forwarded_host="harbor.example.org",
+                sec_fetch_site="cross-site",
+            ),
+            receive,
+            send,
+        )
+    )
+    refused = [m["status"] for m in sent if m["type"] == "http.response.start"]
+    assert len(calls) == 5 and refused == [403, 403, 403]
+
+
+def test_the_cross_site_guard_is_on_without_sign_in(monkeypatch):
+    """Sign-in is not the only reason to refuse other sites: a page could start rollouts either way."""
+    from fastapi import FastAPI
+    from openenv.core.env_server import http_server
+    from openenv.harbor import serving
+
+    monkeypatch.delenv("SPACE_ID", raising=False)
+    monkeypatch.delenv("OAUTH_CLIENT_ID", raising=False)
+    monkeypatch.setattr(http_server, "create_app", lambda *a, **k: FastAPI())
+    monkeypatch.setattr(serving.HarborService, "current", classmethod(lambda cls: None))
+    app = serving.build_app(datasets=[])
+    assert not serving._attach_hf_login(FastAPI())
+    assert serving.SameOrigin in [m.cls for m in app.user_middleware]
 
 
 def test_push_keeps_buckets_private_unless_told(monkeypatch, capsys):
