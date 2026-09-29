@@ -248,7 +248,9 @@ This path involves no env server, which makes it the one to reach for when somet
 openenv harbor serve --llm-url $LLM --dataset org/train,org/eval
 ```
 
-You get a Task API for discovery, one long-running `run_rollout` MCP tool, and a UI at `/web`.
+You get a Task API for discovery, one long-running `run_rollout` MCP tool, and a UI at `/web` for
+reading tasks, running agents on them and reading what they did (see [The web UI](#the-web-ui)).
+`--llm-url` is optional: without it, whoever uses the UI connects a model of their own.
 
 ```python
 from harbor_env import HarborEnv
@@ -264,6 +266,75 @@ with HarborEnv(base_url="http://localhost:8000") as env:
 
 `harness` and `sandbox` are per call, so consecutive rollouts against the same server can use
 different agents and different backends.
+
+## The web UI
+
+`serve` (and a Space made with `push`) serves a UI at `/web`, in four tabs.
+
+**Tasks.** Every task of every served dataset, as cards you can search and filter by dataset,
+category, difficulty and tag. Opening one shows exactly what the agent will receive, the task's files
+(with a full-window viewer), the environment and verifier settings from `task.toml`, and the runs of
+that task. Metadata fields that hold the answer (`gold_answer`, `solution`, ...) are left out of the
+summary. **Add from the Hub** lists public datasets tagged `harbor`, each with its task count and
+size, and adds one in the background with its progress shown; a dataset added this way can be
+removed again. Only datasets in Harbor's `tasks/<name>/` layout (flat or grouped) can be added.
+
+**Running a task.** The run card on a task picks the model, the agent and the sandbox:
+
+- **This server**: the endpoint `serve` was started with. Its key stays in the capture proxy.
+- **Hugging Face**: a model on Inference Providers, chosen from a searchable list with providers,
+  context length and price, reached with a Hugging Face token (locally, this machine's token; on a
+  Space, optionally by signing in with Hugging Face).
+- **Your endpoint**: any OpenAI-compatible URL (vLLM, SGLang, ...) or an Anthropic endpoint, probed
+  before use. Training capture needs vLLM with `--return-tokens-as-token-ids`.
+
+A rollout runs on the server whether or not the page stays open.
+
+**Runs.** Every run you may see, filterable by status. A run shows what the agent did as a timeline
+(its prompt, thinking, each tool call with its input and output, terminal sessions, the final
+answer), the result and reward, the trace checks, and downloads of the result JSON and, for a
+trainable rollout, the training contract. Tick two to four runs to compare them.
+
+**Setup.** The server's endpoint, which sandboxes have working credentials, the deployment settings
+below, the datasets and the agents.
+
+### Deployment settings
+
+The same UI runs on a laptop and as a public Space, and what a visitor may do differs. The defaults
+depend on where the server runs: **local** is `serve --host 127.0.0.1`; **network** is any other bind
+address, including the default `0.0.0.0`, since everyone who can reach it is then a visitor; a
+**Space** is detected from `SPACE_ID`. Each setting is an environment variable (a Space variable on
+a Space), and some have a flag on `serve` and `push`.
+
+| setting | variable | flag | local | network | Space |
+|---|---|---|---|---|---|
+| Visitors may start rollouts | `OPENENV_HARBOR_UI_ROLLOUTS` | `--rollouts` | on | on | on |
+| Visitors may use the server's endpoint | `OPENENV_HARBOR_UI_SERVER_ENDPOINT` | `--share-endpoint` | on | on | on |
+| Visitors may connect their own | `OPENENV_HARBOR_UI_VISITOR_ENDPOINTS` | `--visitor-endpoints` | on | on | on |
+| A visitor's URL may be private or local | `OPENENV_HARBOR_UI_PRIVATE_URLS` | | on | off | off |
+| Offer this machine's HF token | `OPENENV_HARBOR_UI_LOCAL_TOKEN` | | on | off | never |
+| Add and remove Hub datasets from the page | `OPENENV_HARBOR_UI_ADD_DATASETS` | `--add-datasets` | on | off | off |
+| Who sees runs (`all` or `own`) | `OPENENV_HARBOR_RUN_VISIBILITY` | `--run-visibility` | all | all | own |
+| Keep finished runs across restarts | `OPENENV_HARBOR_RUN_HISTORY` | `--run-history` | on | on | off |
+| Rollouts at once | `OPENENV_HARBOR_UI_MAX_RUNS` | | 4 | 4 | 4 |
+| Rollouts at once per visitor | `OPENENV_HARBOR_UI_MAX_RUNS_PER_VISITOR` | | 4 | 4 | 2 |
+
+`own` visibility ties runs to a random id kept in the visitor's browser; a run stores only a digest
+of it. Run history goes to `OPENENV_HARBOR_RUNS_DIR`, by default `~/.cache/openenv/harbor/runs`, or
+`/data/harbor-runs` on a Space with the bucket mounted. `OPENENV_HARBOR_UI_MAX_ADD_GB` (default `5`)
+caps the size of a dataset added from the page.
+
+What the UI guarantees whatever the settings:
+
+- A key or token typed into the page is sent to that endpoint by the server, held in server memory
+  for that page only, and never written to disk, to run history or back to the page.
+- With private URLs off, a visitor's URL, and every redirect it answers with, must resolve to public
+  addresses, and is checked again before each rollout.
+- Every dataset, task and file the page asks for is one the server serves or that was added from
+  the page; a file path cannot leave its task directory.
+- A task from a dataset added from the page may not read the server's environment variables
+  (`${VAR}` in `task.toml` or a compose file), which is where the server's keys are.
+- Everything a model, a task or a tool produced is escaped before it is shown.
 
 ## CLI reference
 
@@ -348,17 +419,24 @@ Start the env server: Task API for discovery, one long-running `run_rollout` MCP
 
 | flag | type | default | meaning |
 |---|---|---|---|
-| `--llm-url` | str | **required** | OpenAI-spec endpoint |
+| `--llm-url` | str | `""` | OpenAI-spec endpoint. Optional: without one, UI visitors connect their own |
 | `--dataset` | str | none | Dataset specs to serve as splits. Repeatable |
 | `--model` | str | `""` | Served model id |
-| `--host` | str | `0.0.0.0` | Bind address |
+| `--host` | str | `0.0.0.0` | Bind address. `127.0.0.1` gives the UI its local defaults, see [Deployment settings](#deployment-settings) |
 | `--port` | int | `8000` | Env server port. Faces the trainer and the browser |
 | `--capture-port` | int | `8100` | Capture proxy port. Faces the sandbox |
 | `--expose` | str | `gradio` | How the sandbox reaches the proxy |
 | `--env-file` | path | `""` | dotenv with provider credentials |
-
 | `--api-key` | str | `$OPENENV_LLM_API_KEY` | Credential for the endpoint, for a hosted provider |
 | `--auth-header` | str | `Authorization` | Header to send it under, e.g. `x-api-key` |
+| `--share-endpoint/--no-share-endpoint` | flag | unset | UI visitors may use this endpoint and its key |
+| `--visitor-endpoints/--no-visitor-endpoints` | flag | unset | UI visitors may connect their own model |
+| `--run-visibility` | str | unset | `all` or `own`: who sees runs in the UI |
+| `--run-history/--no-run-history` | flag | unset | Keep finished UI runs across restarts |
+| `--add-datasets/--no-add-datasets` | flag | unset | UI visitors may add and remove Hub datasets |
+| `--rollouts/--no-rollouts` | flag | unset | UI visitors may start rollouts |
+
+An unset UI flag keeps the default for where the server runs.
 
 Refuses to start only if the endpoint is unreachable. One that cannot return token ids starts as an eval deployment and says so.
 
@@ -368,16 +446,22 @@ Deploy the same server to a Hugging Face Space.
 
 | flag | type | default | meaning |
 |---|---|---|---|
-| `--llm-url` | str | **required** | Endpoint the deployed Space will use |
+| `--llm-url` | str | `""` | Endpoint the deployed Space will use. Optional: without one, visitors connect their own |
 | `--repo-id` | str | **required** | Target Space, e.g. `you/harbor-env` |
 | `--dataset` | str | none | Dataset specs. Repeatable |
 | `--model` | str | `""` | Served model id |
 | `--bucket` | str | Space name | Storage bucket holding the task suites. `none` disables the mount and downloads instead |
+| `--public-bucket/--private-bucket` | flag | private | Visibility of a new bucket. Given for an existing bucket, it changes it; not given, an existing bucket keeps its visibility |
+| `--hf-login/--no-hf-login` | flag | on | Let visitors sign in with Hugging Face to use their own account for Inference Providers |
 | `--hardware` | str | `""` | Space hardware, e.g. `cpu-basic` |
-| `--private` | flag | off | Create it private. Rollouts then cannot work, see below |
+| `--private` | flag | off | Create the Space private. Rollouts then cannot work, see below |
 | `--recreate` | flag | off | Delete the Space first, then deploy fresh |
 | `--dry-run` | flag | off | Print exactly what would be sent and stop |
 | `--env-file` | path | `""` | dotenv whose provider keys become Space **secrets** |
+
+`push` also takes the UI flags of `serve` (`--share-endpoint`, `--visitor-endpoints`,
+`--run-visibility`, `--run-history`, `--add-datasets`, `--rollouts`) and sets them as Space
+variables.
 
 ```bash
 openenv harbor push --llm-url $LLM --dataset org/train,org/eval \
@@ -515,7 +599,20 @@ Two details that matter:
 **Task suites are mounted, not downloaded.** A Harbor suite is thousands of small files and Space
 disk is ephemeral, so a download is re-paid on every restart. `push` syncs the suites into a storage
 bucket named after the Space and mounts it at `/data`. The copy is server side, and re-running
-`push` copies only what is new.
+`push` copies only what is new. The bucket is created private (`--public-bucket` to change that),
+since with run history on it also holds every visitor's runs. With `--add-datasets`, a dataset added
+from the UI is copied into the same bucket, server side, and read through the mount, so it survives
+restarts; removing it deletes it from the bucket.
+
+**Visitors can sign in with Hugging Face.** `push` turns on OAuth for the Space (`hf_oauth: true`,
+scope `inference-api`), and the UI offers "sign in with Hugging Face" as a way to use Inference
+Providers on the visitor's own account instead of pasting a token. It is optional and not needed
+for anything else; `--no-hf-login` leaves it out. With sign-in on, the server refuses state-changing
+requests that a browser makes from another site.
+
+**Rollouts on a Space use the Space's credentials for sandboxes.** An `hf-sandbox` rollout is billed
+to the `HF_TOKEN` the Space holds, whoever started it. `--no-rollouts` makes a public deployment a
+read-only task browser.
 
 **The Space must be public.** The capture proxy is served at `<space-url>/capture`, and a private
 Space requires an auth header that the agent inside the sandbox does not send. This is safe because
@@ -550,6 +647,13 @@ unaffected.
 
 **Many roots for one rollout.** Normal for agents that run subagents or auxiliary calls. Each root
 is a separate conversation, and only agent conversations are counted as trainable.
+
+**A dataset is greyed out in "Add from the Hub".** It has no `tasks/<name>/` folder, which is how
+Harbor datasets are laid out, or it is over `OPENENV_HARBOR_UI_MAX_ADD_GB`.
+
+**A URL is refused as "private or local".** The server does not call private addresses for visitors
+unless `OPENENV_HARBOR_UI_PRIVATE_URLS` is on, which it is only for `--host 127.0.0.1`. To reach a
+vLLM on your own network, run the UI yourself.
 
 **Exit code 137.** The agent was killed inside the sandbox, almost always by the OOM killer on a
 large input. That is a task failure, not a capture failure.
