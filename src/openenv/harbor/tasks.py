@@ -61,6 +61,24 @@ _VALIDATE_TASKS = os.environ.get("OPENENV_VALIDATE_TASKS", "").lower() in (
 )
 
 
+def _nested_task_dirs(base: Path) -> list[Path]:
+    """Every folder under `base` holding a `task.toml`, by relative path; a task's own subfolders
+    are not searched."""
+    found: list[Path] = []
+
+    def walk(folder: Path) -> None:
+        for p in sorted(folder.iterdir()):
+            if not p.is_dir() or p.name.startswith("."):
+                continue
+            if (p / "task.toml").is_file():
+                found.append(p)
+            else:
+                walk(p)
+
+    walk(base)
+    return found
+
+
 def _task_dirs_from_directory(
     root: Path, *, validate: bool | None = None
 ) -> list[Path]:
@@ -78,6 +96,11 @@ def _task_dirs_from_directory(
     candidates = sorted(
         p for p in base.iterdir() if p.is_dir() and not p.name.startswith(".")
     )
+    if candidates and not any((p / "task.toml").is_file() for p in candidates):
+        # Grouped: `tasks/<field>/<subfield>/<task>/` (terminal-bench-science). Only when no top
+        # level folder is a task, so a flat dataset keeps exactly the order, and so the indexes, it
+        # always had.
+        candidates = _nested_task_dirs(base)
     if not (_VALIDATE_TASKS if validate is None else validate):
         return candidates
     try:
@@ -87,8 +110,12 @@ def _task_dirs_from_directory(
     return [p for p in candidates if Task.is_valid_dir(p, disable_verification=True)]
 
 
-def resolve_task_dirs(spec: str, *, refresh: bool = False) -> list[Path]:
+def resolve_task_dirs(
+    spec: str, *, refresh: bool = False, tqdm_class: Any = None
+) -> list[Path]:
     """Resolve a dataset spec to an ordered list of Harbor task directories.
+
+    `tqdm_class` is handed to the Hub download, for a caller that shows its progress.
 
     Order is stable (sorted by directory name) because a task's *index* is its identity everywhere
     downstream — a trainer's dataset row, a `run_rollout` argument, a result. An unstable order would
@@ -102,7 +129,9 @@ def resolve_task_dirs(spec: str, *, refresh: bool = False) -> list[Path]:
     if path.is_dir():
         dirs = _task_dirs_from_directory(path)
     elif _is_hf_repo(spec):
-        dirs = _task_dirs_from_directory(_materialise_hf_dataset(spec))
+        dirs = _task_dirs_from_directory(
+            _materialise_hf_dataset(spec, tqdm_class=tqdm_class)
+        )
     else:
         dirs = _registry_task_dirs(spec)
 
@@ -145,7 +174,7 @@ _DATASET_ROOT = Path(
 _DOWNLOAD_WORKERS = int(os.environ.get("OPENENV_DATASET_WORKERS", "32"))
 
 
-def _materialise_hf_dataset(spec: str) -> Path:
+def _materialise_hf_dataset(spec: str, *, tqdm_class: Any = None) -> Path:
     """Download an HF dataset as real files and return its local root.
 
     Mounting beats downloading where it is available: a deployed Space can attach the dataset repo
@@ -162,6 +191,7 @@ def _materialise_hf_dataset(spec: str) -> Path:
         allow_patterns=["tasks/**"],
         local_dir=str(target),
         max_workers=_DOWNLOAD_WORKERS,
+        **({"tqdm_class": tqdm_class} if tqdm_class is not None else {}),
     )
     return target
 
