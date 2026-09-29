@@ -425,9 +425,13 @@ def _read_reward_override(
 def _parse_reward_override(raw: str) -> tuple[float | None, str | None]:
     """Parse the reward file written by a verify command.
 
-    Returns `(reward, None)` for a finite value in [0, 1], `(None, None)` when
-    the file is empty, and `(None, reason)` when the value is rejected, in
-    which case the caller falls back to the verify pass rate.
+    The value comes from the task author rather than the agent, so any finite
+    reward is accepted, including negative ones and values above 1. Only a
+    value that would poison training is rejected.
+
+    Returns `(reward, None)` for a finite value, `(None, None)` when the file
+    is empty, and `(None, reason)` when the value is rejected, in which case
+    the caller falls back to the verify pass rate.
     """
     raw = raw.strip()
     if not raw:
@@ -436,6 +440,6 @@ def _parse_reward_override(raw: str) -> tuple[float | None, str | None]:
         value = float(raw)
     except ValueError:
         return None, f"not a number: {raw[:40]!r}"
-    if not math.isfinite(value) or not 0.0 <= value <= 1.0:
-        return None, f"outside [0, 1]: {raw[:40]!r}"
+    if not math.isfinite(value):
+        return None, f"not finite: {raw[:40]!r}"
     return value, None

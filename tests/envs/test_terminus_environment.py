@@ -236,12 +236,20 @@ def test_reward_file_written_by_a_verify_command_overrides_the_pass_rate():
     assert state.reward_override_ignored is None
 
 
-@pytest.mark.parametrize("value", ["nan", "inf", "-0.5", "1.5", "passed"])
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf", "passed"])
 def test_invalid_reward_file_falls_back_to_the_pass_rate(value):
     state = _submit(RewardFileSandbox(), [f"echo {value} > {REWARD_FILE}", "exit 1"])
 
     assert state.last_reward == 0.5
     assert repr(value) in state.reward_override_ignored
+
+
+@pytest.mark.parametrize("value", ["-0.5", "1.5"])
+def test_reward_file_outside_the_unit_interval_is_kept(value):
+    state = _submit(RewardFileSandbox(), [f"echo {value} > {REWARD_FILE}", "exit 1"])
+
+    assert state.last_reward == float(value)
+    assert state.reward_override_ignored is None
 
 
 def test_reward_file_that_cannot_be_removed_is_ignored():

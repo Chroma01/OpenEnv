@@ -103,8 +103,10 @@ can override this by writing a float to:
 
 The file is deleted before the verify commands run, so only a verify command
 can set it; anything the agent writes there earlier is discarded. The value
-must be a number in `[0, 1]`. Anything else is ignored, the pass rate is used,
-and the reason is recorded in `state.reward_override_ignored`.
+must be a finite number; a verify command is written by the task author, so
+negative rewards and values above 1 are accepted too. A value that is not a
+finite number is ignored, the pass rate is used, and the reason is recorded in
+`state.reward_override_ignored`.
 
 ## Notes
 
