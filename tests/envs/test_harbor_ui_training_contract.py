@@ -933,12 +933,17 @@ def test_push_keeps_buckets_private_unless_told(monkeypatch, capsys):
 
 def test_push_refuses_a_space_whose_visitors_would_have_no_model():
     """On a Space the endpoint is shared only when asked, so turning visitors' own models off needs it."""
+    import re
+
     from openenv.cli.commands.harbor import app
     from typer.testing import CliRunner
 
     args = ["push", "--repo-id", "org/space", "--llm-url", "http://engine:8000/v1"]
     refused = CliRunner().invoke(app, [*args, "--no-visitor-endpoints"])
-    assert refused.exit_code != 0 and "needs --share-endpoint" in refused.output
+    # Rich colours and boxes the error where it sees a colour terminal (GitHub Actions): read the text
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", refused.output)
+    text = " ".join(re.sub(r"[│╭╮╰╯─]", " ", plain).split())
+    assert refused.exit_code == 2 and "needs --share-endpoint" in text
 
 
 def test_push_turns_on_sign_in_in_the_space_readme(tmp_path):
