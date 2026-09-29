@@ -314,7 +314,9 @@ a Space), and some have a flag on `serve` and `push`.
 `own` visibility ties runs to a random id kept in the visitor's browser; a run stores only a digest
 of it. That keeps visitors' runs apart, but it is not sign-in: a visitor who clears the browser's
 storage loses their runs, and it is no substitute for access control over traces you consider
-private. Run history goes to `OPENENV_HARBOR_RUNS_DIR`, by default `~/.cache/openenv/harbor/runs`, or
+private. The per-visitor limit counts a signed-in visitor's Hugging Face account, and otherwise that
+browser id, so for anonymous visitors it stops one page from taking every slot, not someone set on
+it; `OPENENV_HARBOR_UI_MAX_RUNS` bounds the total. Run history goes to `OPENENV_HARBOR_RUNS_DIR`, by default `~/.cache/openenv/harbor/runs`, or
 `/data/harbor-runs` on a Space with the bucket mounted. `OPENENV_HARBOR_UI_MAX_ADD_GB` (default `5`)
 caps the size of a dataset added from the page.
 
@@ -327,7 +329,8 @@ What the UI guarantees whatever the settings:
 - Every dataset, task and file the page asks for is one the server serves or that was added from
   the page; a file path cannot leave its task directory.
 - A task from a dataset added from the page may not read the server's environment variables
-  (`${VAR}` in `task.toml` or a compose file), which is where the server's keys are.
+  (`${VAR}` in `task.toml` or a compose file), which is where the server's keys are, nor its files
+  (a compose `env_file`, `include`, `extends`, or a bind mount from outside the task).
 - A request that changes something in the UI (a rollout, an added dataset) is refused when a
   browser sends it from another site, so another page can't act through a visitor's browser. Behind
   a proxy that rewrites `Host`, list the public host in `OPENENV_HARBOR_UI_HOSTS` (comma-separated).

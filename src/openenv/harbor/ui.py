@@ -1175,8 +1175,8 @@ def harbor_gradio_builder(
             )
         if reads_env:
             return say(
-                "This task reads environment variables from the server, which only datasets the "
-                "server was started with may do."
+                "This task reads environment variables or files from the server, which only "
+                "datasets the server was started with may do."
             )
         service = HarborService.current()
         if service is None:
@@ -1196,6 +1196,10 @@ def harbor_gradio_builder(
                 title=str(selection.get("title") or ""),
                 per_owner=settings.max_runs_per_visitor,
                 private_urls=settings.private_urls,
+                # a browser id is free to replace, so a signed-in visitor's cap follows the account
+                quota=f"hf:{profile.username}"
+                if getattr(profile, "username", None)
+                else "",
             )
         except (RuntimeError, IndexError, ValueError) as exc:
             return say(str(exc))

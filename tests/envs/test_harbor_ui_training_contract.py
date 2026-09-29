@@ -476,6 +476,93 @@ def test_tasks_that_read_the_server_environment_are_found(monkeypatch, tmp_path)
     assert ui_data.reads_environment("org/x", 0)
 
 
+def test_a_compose_file_that_reads_the_host_is_found(monkeypatch, tmp_path):
+    """Compose can pull the host's files into a container, which a local backend runs on this machine."""
+    from openenv.harbor import ui_data
+
+    task = tmp_path / "t"
+    (task / "environment" / "sub").mkdir(parents=True)
+    (task / "task.toml").write_text("[verifier]\ntimeout_sec = 60\n")
+    monkeypatch.setattr(
+        "openenv.harbor.tasks.HarborTaskProvider.task_dir", lambda *a: task
+    )
+    included = (
+        task / "environment" / "sub" / "base.yaml"
+    )  # one compose file can include another
+    for text in (
+        "services:\n  a:\n    env_file: /home/me/.env\n",
+        "include:\n  - ../../other.yaml\n",
+        "services:\n  a:\n    extends:\n      file: /etc/x.yaml\n",
+        "services:\n  a:\n    volumes:\n      - /:/host\n",
+        "services:\n  a:\n    volumes:\n      - ~/.cache:/c\n",
+        "services:\n  a:\n    volumes:\n      - type: bind\n        source: ../..\n        target: /x\n",
+    ):
+        included.write_text(text)
+        assert ui_data.reads_environment("org/x", 0), text
+    included.write_text("services:\n  a:\n    volumes:\n      - ./data:/data\n")
+    assert not ui_data.reads_environment("org/x", 0), "the task's own files are fine"
+
+
+def test_the_file_tree_lists_the_top_level_first_and_stops_at_the_cap(
+    monkeypatch, tmp_path
+):
+    from openenv.harbor import ui_data
+
+    for rel in (
+        "task.toml",
+        "instruction.md",
+        ".secret",
+        "tests/test.sh",
+        "environment/Dockerfile",
+    ):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("x")
+    files, cut = ui_data.file_tree(tmp_path)
+    assert [f["path"] for f in files] == [
+        "instruction.md",
+        "task.toml",
+        "environment/Dockerfile",
+        "tests/test.sh",
+    ]
+    assert not cut
+    monkeypatch.setattr(ui_data, "MAX_TREE_FILES", 2)
+    files, cut = ui_data.file_tree(tmp_path)
+    assert len(files) == 2 and cut
+
+
+def test_a_dataset_of_unknown_size_is_measured_or_refused(monkeypatch):
+    import time
+    from types import SimpleNamespace
+
+    from openenv.harbor import ui_data
+
+    class Api:
+        def __init__(self, token=None):
+            pass
+
+        def list_repo_tree(
+            self, spec, repo_type=None, path_in_repo=None, recursive=None
+        ):
+            return iter([SimpleNamespace(size=3_000_000_000)] * 3)
+
+    monkeypatch.setattr("huggingface_hub.HfApi", Api)
+    assert ui_data._tasks_bytes("org/big", cap=5_000_000_000) == 6_000_000_000, (
+        "stops once past the cap"
+    )
+    monkeypatch.setattr(
+        ui_data, "hub_summary", lambda spec: {"tasks": 3, "bytes": None}
+    )
+    monkeypatch.setattr(ui_data, "_tasks_bytes", lambda spec, cap: None)
+    ui_data._JOBS.pop("org/unsized", None)
+    ui_data.start_add("org/unsized", on_added=lambda target: None)
+    for _ in range(100):
+        job = ui_data.add_status("org/unsized")
+        if job["state"] == "error":
+            break
+        time.sleep(0.02)
+    assert job["state"] == "error" and "Couldn't tell how big" in job["error"]
+
+
 def test_harbor_expands_only_braced_variables_in_task_toml(monkeypatch):
     """Why `reads_environment` looks for `${` alone in task.toml: Harbor leaves a bare `$VAR` as is.
 
@@ -525,6 +612,10 @@ def test_one_visitor_cannot_hold_every_slot(monkeypatch, tmp_path):
         with pytest.raises(RuntimeError, match="already have 1"):
             manager.start(**kwargs, owner="a", per_owner=1)
         manager.start(**kwargs, owner="b", per_owner=1)
+        # signed in, the cap follows the account: a fresh browser id is not a fresh allowance
+        manager.start(**kwargs, owner="c", per_owner=1, quota="hf:alice")
+        with pytest.raises(RuntimeError, match="already have 1"):
+            manager.start(**kwargs, owner="d", per_owner=1, quota="hf:alice")
     finally:
         release.set()
 

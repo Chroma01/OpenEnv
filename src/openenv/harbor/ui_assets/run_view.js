@@ -21,7 +21,7 @@ element.addEventListener("toggle", (ev) => {
 async function download(button) {
   const label = button.innerHTML;
   button.disabled = true;
-  button.innerHTML = `<span class="hb-spinner"></span>${button.textContent}`;
+  button.innerHTML = `<span class="hb-spinner"></span>${esc(button.textContent)}`;
   try {
     const res = await server.hb_download([button.dataset.grant, button.dataset.dl]);
     if (res.error) throw new Error(res.error);
@@ -31,7 +31,7 @@ async function download(button) {
     setTimeout(() => URL.revokeObjectURL(url), 2000);
     button.innerHTML = label;
   } catch (e) {
-    button.innerHTML = `${icon("alert", 14)}${String(e.message || e).slice(0, 60)}`;
+    button.innerHTML = `${icon("alert", 14)}${esc(String(e.message || e).slice(0, 60))}`;
     setTimeout(() => { button.innerHTML = label; }, 3000);
   }
   button.disabled = false;

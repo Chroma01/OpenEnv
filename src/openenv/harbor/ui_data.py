@@ -348,26 +348,19 @@ def file_tree(task_dir: Path) -> tuple[list[dict[str, Any]], bool]:
     """
     files: list[dict[str, Any]] = []
     root = task_dir.resolve()
-    # Files at the task's top level first (instruction.md, task.toml), then each folder in turn.
-    paths = sorted(
-        root.rglob("*"),
-        key=lambda p: (
-            len(p.relative_to(root).parts) > 1,
-            p.relative_to(root).as_posix(),
-        ),
-    )
-    for path in paths:
-        if len(files) >= MAX_TREE_FILES:
-            return files, True
-        if path.is_dir() or any(
-            part.startswith(".") for part in path.relative_to(root).parts
-        ):
-            continue
-        try:
-            size = path.stat().st_size
-        except OSError:
-            continue
-        files.append({"path": path.relative_to(root).as_posix(), "size": size})
+    # Files at the task's top level first (instruction.md, task.toml), then each folder in turn,
+    # walked lazily: a vendored tree of a million files is read only as far as the cap.
+    for folder, dirs, names in os.walk(root):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        for name in sorted(n for n in names if not n.startswith(".")):
+            if len(files) >= MAX_TREE_FILES:
+                return files, True
+            path = Path(folder) / name
+            try:
+                size = path.stat().st_size
+            except OSError:
+                continue
+            files.append({"path": path.relative_to(root).as_posix(), "size": size})
     return files, False
 
 
@@ -409,21 +402,29 @@ def task_detail(spec: str, index: int) -> dict[str, Any]:
 
 
 def reads_environment(spec: str, index: int) -> bool:
-    """Whether a task asks Harbor for values from the server's environment.
+    """Whether a task would read this server's environment variables or files.
 
     Harbor resolves `${VAR}` in `task.toml` (`[verifier.env]`, `[environment.env]`) from the process
-    environment, and Docker Compose does the same in an environment's compose file. Either one hands
-    the task this server's keys.
+    environment, and Docker Compose expands `$VAR` in a compose file the same way. Either one hands
+    the task this server's keys. A compose file can also reach past its own folder: `env_file`,
+    `include` and `extends` read other files, and a bind mount of an absolute or parent path puts
+    the host's files in the container, which a local container backend runs on this machine. Every
+    YAML file under `environment/` is checked, since one compose file can include another.
     """
     task_dir = HarborTaskProvider([spec]).task_dir(spec, int(index))
-    checks = [(task_dir / "task.toml", _HARBOR_VAR)]
-    checks += [(p, _COMPOSE_VAR) for p in task_dir.glob("environment/*compose*.y*ml")]
-    for path, pattern in checks:
+    checks = [(task_dir / "task.toml", (_HARBOR_VAR,))]
+    checks += [
+        (p, _COMPOSE_READS)
+        for p in (task_dir / "environment").rglob("*")
+        if p.suffix in (".yml", ".yaml") and p.is_file()
+    ]
+    for path, patterns in checks:
         try:
-            if pattern.search(path.read_text(errors="replace")):
-                return True
+            text = path.read_text(errors="replace")
         except OSError:
             continue
+        if any(pattern.search(text) for pattern in patterns):
+            return True
     return False
 
 
@@ -431,6 +432,13 @@ def reads_environment(spec: str, index: int) -> bool:
 # is flagged; Docker Compose also expands a bare `$VAR`.
 _HARBOR_VAR = re.compile(r"\$\{")
 _COMPOSE_VAR = re.compile(r"\$(\{|[A-Za-z_])")
+_COMPOSE_READS = (
+    _COMPOSE_VAR,
+    re.compile(r"^\s*(env_file|include|extends)\s*:", re.M),
+    # a bind mount from the host: `- /abs:/x`, `- ~/x:/x`, `- ../x:/x`, or `source: /abs`
+    re.compile(r"^\s*-\s*[\"']?(/|~|\.\.)[^:\n]*:", re.M),
+    re.compile(r"^\s*source\s*:\s*[\"']?(/|~|\.\.)", re.M),
+)
 
 
 def read_task_file(spec: str, index: int, path: str) -> dict[str, Any]:
@@ -635,6 +643,31 @@ def hub_summary(spec: str) -> dict[str, Any]:
     return {"tasks": tasks, "bytes": size}
 
 
+def _tasks_bytes(spec: str, cap: int, max_files: int = 500_000) -> int | None:
+    """The size of a Hub dataset's `tasks/` folder from its file listing, or `None` if unknown.
+
+    Stops counting once the total passes `cap`, since that already settles the question; a listing
+    longer than `max_files` is not read to the end, and counts as unknown.
+    """
+    from huggingface_hub import HfApi
+
+    total = 0
+    try:
+        for n, entry in enumerate(
+            HfApi(token=False).list_repo_tree(
+                spec, repo_type="dataset", path_in_repo="tasks", recursive=True
+            )
+        ):
+            total += int(getattr(entry, "size", 0) or 0)
+            if total > cap:
+                return total
+            if n >= max_files:
+                return None
+    except Exception:  # noqa: BLE001 - no listing, no size
+        return None
+    return total
+
+
 def _progress(job: dict[str, Any]) -> Any:
     """A silent tqdm that records the Hub download's file count in `job`.
 
@@ -821,7 +854,14 @@ def start_add(spec: str, on_added: Any, settings: Any = None) -> dict[str, Any]:
                 raise ValueError(
                     "This dataset has no tasks/<name>/ folder, which is how Harbor datasets are laid out."
                 )
-            if summary["bytes"] and summary["bytes"] > _max_add_bytes():
+            if summary["bytes"] is None:
+                # the Hub has no size for some repositories; measure what the download would take
+                summary["bytes"] = _tasks_bytes(spec, _max_add_bytes())
+            if summary["bytes"] is None:
+                raise ValueError(
+                    "Couldn't tell how big this dataset is, so it isn't added from the page."
+                )
+            if summary["bytes"] > _max_add_bytes():
                 raise ValueError(
                     f"This dataset is {summary['bytes'] / 1e9:.1f} GB, over the "
                     f"{_max_add_bytes() / 1e9:.0f} GB this server adds from the page "

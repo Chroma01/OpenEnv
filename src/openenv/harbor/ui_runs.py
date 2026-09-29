@@ -132,6 +132,8 @@ class LiveRun:
     endpoint: str
     purpose: str
     owner: str = ""
+    # What `per_owner` counts against; in memory only (not in `_META`), so never written to disk.
+    quota: str = ""
     task_title: str = ""
     created: float = field(default_factory=time.time)
     status: str = "starting"
@@ -184,12 +186,14 @@ class RunManager:
         title: str = "",
         per_owner: int | None = None,
         private_urls: bool = True,
+        quota: str = "",
     ) -> str:
         """Start a rollout in a worker thread and return its run id at once.
 
         `owner` is the digest `ui_settings.owner_of` makes of the visitor's browser id; listings and
         lookups made for that visitor pass the same digest. `per_owner` caps how many of the running
-        rollouts one owner may hold. `private_urls=False` checks a visitor's endpoint URL again right
+        rollouts one owner may hold, counted by `quota` when one is given: the signed-in Hugging Face
+        account, since a browser id is free to replace. `private_urls=False` checks a visitor's endpoint URL again right
         before the rollout calls it (see `ui_settings.url_problem`).
 
         Raises:
@@ -213,6 +217,7 @@ class RunManager:
             else "server default",
             purpose=str(engine.get("purpose") or "eval"),
             owner=owner,
+            quota=quota or owner,
         )
         with self._lock:
             running = [r for r in self._live.values() if r.status in LIVE]
@@ -221,7 +226,10 @@ class RunManager:
                     f"{self.max_live} rollouts are already running on this server. "
                     "Wait for one to finish."
                 )
-            if per_owner and sum(1 for r in running if r.owner == owner) >= per_owner:
+            if (
+                per_owner
+                and sum(1 for r in running if r.quota == run.quota) >= per_owner
+            ):
                 raise RuntimeError(
                     f"You already have {per_owner} rollout{'s' if per_owner != 1 else ''} running. "
                     "Wait for one to finish."
