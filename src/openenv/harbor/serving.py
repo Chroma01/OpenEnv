@@ -392,9 +392,8 @@ class SameOrigin:
             }
             site = headers.get("sec-fetch-site", "")
             origin = headers.get("origin", "")
-            hosts = (headers.get("host", ""), headers.get("x-forwarded-host", ""))
             if site == "cross-site" or (
-                origin and not any(_same_host(origin, h) for h in hosts if h)
+                origin and not _same_host(origin, headers.get("host", ""))
             ):
                 from starlette.responses import PlainTextResponse
 
@@ -406,10 +405,16 @@ class SameOrigin:
 
 
 def _same_host(origin: str, host: str) -> bool:
+    """Whether a page at `origin` is this server's own.
+
+    Its own hosts are the `Host` it was reached at, a Space's `SPACE_HOST`, and any listed in
+    `OPENENV_HARBOR_UI_HOSTS` (for a proxy that rewrites `Host`). Never `X-Forwarded-Host`: a
+    client sets that itself, so it would let any origin vouch for itself.
+    """
     from urllib.parse import urlparse
 
-    allowed = {
-        host,
-        *[h.strip() for h in os.environ.get("SPACE_HOST", "").split(",") if h.strip()],
-    }
+    listed = ",".join(
+        os.environ.get(k, "") for k in ("SPACE_HOST", "OPENENV_HARBOR_UI_HOSTS")
+    )
+    allowed = {host, *[h.strip() for h in listed.split(",") if h.strip()]}
     return urlparse(origin).netloc in allowed

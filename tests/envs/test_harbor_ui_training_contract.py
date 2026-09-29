@@ -669,7 +669,7 @@ def test_signing_in_is_an_account_for_inference_providers(monkeypatch):
     assert "hf_oauth_token" not in json.dumps(remembered.get("custom"))
 
 
-def test_a_cross_site_request_is_refused_and_others_pass():
+def test_a_cross_site_request_is_refused_and_others_pass(monkeypatch):
     import asyncio
 
     from openenv.harbor.serving import SameOrigin
@@ -741,15 +741,25 @@ def test_a_cross_site_request_is_refused_and_others_pass():
             send,
         )
     )
-    # behind a proxy that rewrites Host, the page's own origin arrives as X-Forwarded-Host
+    # a client vouching for its own origin through X-Forwarded-Host is not believed
     asyncio.run(
         guard(
             request(
                 "POST",
                 host="10.0.0.5:8000",
-                x_forwarded_host="harbor.example.org",
-                origin="https://harbor.example.org",
+                x_forwarded_host="evil.example",
+                origin="https://evil.example",
             ),
+            receive,
+            send,
+        )
+    )
+    assert len(calls) == 4
+    # behind a proxy that rewrites Host, the public host is listed by the operator instead
+    monkeypatch.setenv("OPENENV_HARBOR_UI_HOSTS", "harbor.example.org")
+    asyncio.run(
+        guard(
+            request("POST", host="10.0.0.5:8000", origin="https://harbor.example.org"),
             receive,
             send,
         )
@@ -760,7 +770,7 @@ def test_a_cross_site_request_is_refused_and_others_pass():
             request(
                 "POST",
                 host="10.0.0.5:8000",
-                x_forwarded_host="harbor.example.org",
+                origin="https://harbor.example.org",
                 sec_fetch_site="cross-site",
             ),
             receive,
@@ -768,7 +778,7 @@ def test_a_cross_site_request_is_refused_and_others_pass():
         )
     )
     refused = [m["status"] for m in sent if m["type"] == "http.response.start"]
-    assert len(calls) == 5 and refused == [403, 403, 403]
+    assert len(calls) == 5 and refused == [403, 403, 403, 403]
 
 
 def test_the_cross_site_guard_is_on_without_sign_in(monkeypatch):

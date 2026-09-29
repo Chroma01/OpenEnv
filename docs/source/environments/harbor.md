@@ -329,7 +329,8 @@ What the UI guarantees whatever the settings:
 - A task from a dataset added from the page may not read the server's environment variables
   (`${VAR}` in `task.toml` or a compose file), which is where the server's keys are.
 - A request that changes something in the UI (a rollout, an added dataset) is refused when a
-  browser sends it from another site, so another page can't act through a visitor's browser.
+  browser sends it from another site, so another page can't act through a visitor's browser. Behind
+  a proxy that rewrites `Host`, list the public host in `OPENENV_HARBOR_UI_HOSTS` (comma-separated).
 - Everything a model, a task or a tool produced is escaped before it is shown.
 
 ## CLI reference
