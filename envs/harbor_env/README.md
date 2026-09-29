@@ -343,8 +343,8 @@ What the UI guarantees whatever the settings:
 
 ## CLI reference
 
-Four commands. Every flag below is the complete set, with its type and default. `openenv harbor
-<command> --help` prints the same thing.
+Four commands. Every flag below is the complete set, with its type and default.
+`openenv harbor <command> --help` prints the same thing.
 
 Exit codes:
 
