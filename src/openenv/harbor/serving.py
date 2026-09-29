@@ -86,6 +86,7 @@ class HarborService:
         self.llm_url = llm_url
         self.model = model
         self.datasets = datasets
+        self.provider = provider
         self.capture_level = "text" if provider == "anthropic" else capture_level
         self.capture = CaptureServer(
             llm_url=llm_url,
@@ -297,10 +298,12 @@ def build_app(
     ) -> Any:
         """OpenEnv calls this positionally with six web-interface arguments.
 
-        Only the title is useful here: the Harbor UI drives rollouts through its own handlers rather
-        than the generic action-field form, because a rollout is one long tool call, not a step.
+        None of them is used: the Harbor UI drives rollouts through its own handlers rather than the
+        generic action-field form, because a rollout is one long tool call, not a step. Even the
+        title is its own, since OpenEnv's ("OpenEnv Agentic Environment: harbor_env") names the
+        env class rather than what the page is.
         """
-        return harbor_gradio_builder(datasets=datasets, title=display_title or "Harbor")
+        return harbor_gradio_builder(datasets=datasets, title="OpenEnv × Harbor")
 
     app = create_app(
         HarborEnvironment,
@@ -321,4 +324,83 @@ def build_app(
     if service is not None and service.mounted:
         app.mount(CAPTURE_MOUNT, service.capture.app)
 
+    _attach_hf_login(app)
     return app
+
+
+def _attach_hf_login(app: Any) -> bool:
+    """ "Sign in with Hugging Face", where the Hub has set it up for the Space (`hf_oauth: true`).
+
+    Attached to this app rather than to the Gradio UI mounted at `/web`: Gradio's OAuth routes and
+    the callback URL it registers assume the site root. Gradio then hands the signed-in visitor's
+    token to any UI handler that asks for a `gr.OAuthToken`, through the session cookie set here.
+
+    A cookie that identifies the visitor makes another website's request count as theirs, and
+    Gradio accepts requests from any origin, so a same-origin check comes with it.
+    """
+    from .ui_settings import load
+
+    if not load().hf_login:
+        return False
+    # Gradio tells a Space from a laptop by `SYSTEM=spaces`, which Docker Spaces do not set. Without
+    # it, `attach_oauth` installs its local stand-in, which signs every visitor in as the account of
+    # the token the server holds (the operator's), with a token that calls nothing. `hf_login` is
+    # only true on a Space that has an OAuth app, so this is that Space.
+    os.environ.setdefault("SYSTEM", "spaces")
+    try:
+        from gradio.oauth import attach_oauth
+        from gradio.utils import get_space
+
+        if get_space() is None:
+            print("hf login  off: Gradio does not see a Space here")
+            return False
+        attach_oauth(app)
+    except (ImportError, ValueError) as exc:
+        print(f"hf login  off: {exc}")
+        return False
+    app.add_middleware(SameOrigin)
+    print("hf login  on (Inference Providers with the visitor's own account)")
+    return True
+
+
+class SameOrigin:
+    """Refuse a state-changing request that a browser made from another site.
+
+    Browsers label every request they make (`Sec-Fetch-Site`, `Origin`); servers calling this app,
+    such as a sandbox reaching the capture proxy or a trainer on the Task API, send neither and pass.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if scope.get("type") == "http" and scope.get("method") not in (
+            "GET",
+            "HEAD",
+            "OPTIONS",
+        ):
+            headers = {
+                k.decode().lower(): v.decode() for k, v in scope.get("headers") or []
+            }
+            site = headers.get("sec-fetch-site", "")
+            origin = headers.get("origin", "")
+            if site == "cross-site" or (
+                origin and not _same_host(origin, headers.get("host", ""))
+            ):
+                from starlette.responses import PlainTextResponse
+
+                await PlainTextResponse("cross-site request refused", status_code=403)(
+                    scope, receive, send
+                )
+                return
+        await self.app(scope, receive, send)
+
+
+def _same_host(origin: str, host: str) -> bool:
+    from urllib.parse import urlparse
+
+    allowed = {
+        host,
+        *[h.strip() for h in os.environ.get("SPACE_HOST", "").split(",") if h.strip()],
+    }
+    return urlparse(origin).netloc in allowed

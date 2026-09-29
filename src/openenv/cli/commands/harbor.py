@@ -56,6 +56,10 @@ _LLM_HELP_OPTIONAL = (
     "OpenAI-spec inference endpoint. Optional here: without it, `info` "
     "still reports sandboxes, datasets and harnesses."
 )
+_LLM_HELP_PUSH = (
+    "The Space's own inference endpoint. Optional: without one, visitors connect their own model "
+    "in the UI (see --visitor-endpoints)."
+)
 _KEY_HELP = (
     "Credential for the inference endpoint, for a hosted provider (OpenAI, Anthropic, HF "
     "Inference Providers). Defaults to $OPENENV_LLM_API_KEY. This is NOT the key the agent "
@@ -66,6 +70,59 @@ _AUTH_HEADER_HELP = (
     "Header to send --api-key under. `Authorization` gets a `Bearer ` prefix; anything else "
     "(e.g. x-api-key) gets the raw key."
 )
+
+
+_SHARE_HELP = (
+    "Let visitors of the UI run on this server's endpoint and key. --no-share-endpoint makes each "
+    "visitor connect their own model. Default: shared."
+)
+_VISITOR_HELP = (
+    "Let visitors connect their own model in the UI: a Hugging Face token and model, or any "
+    "OpenAI-compatible URL such as vLLM. Default: allowed."
+)
+_VISIBILITY_HELP = (
+    "Who sees runs in the UI: `all` (every visitor sees every run) or `own` (each browser sees the "
+    "runs it started). Default: all locally, own on a Space."
+)
+_HISTORY_HELP = "Keep finished UI runs on disk across restarts. Default: on locally, off on a Space."
+_ROLLOUTS_HELP = (
+    "Let visitors start rollouts from the UI. --no-rollouts makes it a read-only task browser. "
+    "Default: on."
+)
+_ADD_HELP = (
+    "Let visitors add and remove Hub datasets from the UI. On a Space with a bucket they are copied "
+    "into it; otherwise downloaded. Default: on only for a server on 127.0.0.1."
+)
+
+
+def _ui_env(
+    share_endpoint: Optional[bool],
+    visitor_endpoints: Optional[bool],
+    run_visibility: str,
+    run_history: Optional[bool],
+    add_datasets: Optional[bool] = None,
+    rollouts: Optional[bool] = None,
+) -> dict[str, str]:
+    """The UI's deployment settings as the variables `openenv.harbor.ui_settings` reads.
+
+    Only flags that were given become variables, so an unset one keeps the default for where the
+    server runs (a laptop or a Space).
+    """
+    if run_visibility and run_visibility not in ("all", "own"):
+        raise typer.BadParameter("--run-visibility is `all` or `own`")
+    out = {}
+    for name, value in (
+        ("OPENENV_HARBOR_UI_SERVER_ENDPOINT", share_endpoint),
+        ("OPENENV_HARBOR_UI_VISITOR_ENDPOINTS", visitor_endpoints),
+        ("OPENENV_HARBOR_RUN_HISTORY", run_history),
+        ("OPENENV_HARBOR_UI_ADD_DATASETS", add_datasets),
+        ("OPENENV_HARBOR_UI_ROLLOUTS", rollouts),
+    ):
+        if value is not None:
+            out[name] = "1" if value else "0"
+    if run_visibility:
+        out["OPENENV_HARBOR_RUN_VISIBILITY"] = run_visibility
+    return out
 
 
 def _split(values: Optional[list[str]]) -> list[str]:
@@ -254,6 +311,29 @@ def serve(
         str, typer.Option("--auth-header", help=_AUTH_HEADER_HELP)
     ] = "Authorization",
     env_file: Annotated[str, typer.Option("--env-file")] = "",
+    share_endpoint: Annotated[
+        Optional[bool],
+        typer.Option("--share-endpoint/--no-share-endpoint", help=_SHARE_HELP),
+    ] = None,
+    visitor_endpoints: Annotated[
+        Optional[bool],
+        typer.Option("--visitor-endpoints/--no-visitor-endpoints", help=_VISITOR_HELP),
+    ] = None,
+    run_visibility: Annotated[
+        str, typer.Option("--run-visibility", help=_VISIBILITY_HELP)
+    ] = "",
+    run_history: Annotated[
+        Optional[bool],
+        typer.Option("--run-history/--no-run-history", help=_HISTORY_HELP),
+    ] = None,
+    add_datasets: Annotated[
+        Optional[bool],
+        typer.Option("--add-datasets/--no-add-datasets", help=_ADD_HELP),
+    ] = None,
+    rollouts: Annotated[
+        Optional[bool],
+        typer.Option("--rollouts/--no-rollouts", help=_ROLLOUTS_HELP),
+    ] = None,
 ) -> None:
     """Serve Harbor tasks over the OpenEnv Task API and MCP.
 
@@ -263,6 +343,18 @@ def serve(
     """
     from openenv.harbor.serving import serve_harbor
 
+    os.environ.update(
+        _ui_env(
+            share_endpoint,
+            visitor_endpoints,
+            run_visibility,
+            run_history,
+            add_datasets,
+            rollouts,
+        )
+    )
+    # The UI's laptop defaults (this machine's token, private URLs) are for a loopback-only server.
+    os.environ["OPENENV_HARBOR_UI_HOST"] = host
     serve_harbor(
         llm_url=llm_url,
         model=model or None,
@@ -280,7 +372,7 @@ def serve(
 
 @app.command("push")
 def push(
-    llm_url: Annotated[str, typer.Option("--llm-url", help=_LLM_HELP)],
+    llm_url: Annotated[str, typer.Option("--llm-url", help=_LLM_HELP_PUSH)] = "",
     repo_id: Annotated[
         str, typer.Option("--repo-id", help="Target, e.g. your-org/harbor-env.")
     ] = "",
@@ -315,6 +407,23 @@ def push(
             help="Storage bucket holding the task suites. Defaults to a bucket named after the Space. Pass `none` to skip the bucket and let the Space download datasets instead.",
         ),
     ] = "",
+    public_bucket: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--public-bucket/--private-bucket",
+            help="Visibility of the Space's bucket. Private unless --public-bucket: it holds the task "
+            "suites and, with run history on, every visitor's runs. Given for an existing bucket, it "
+            "changes that bucket's visibility; not given, an existing bucket is left as it is.",
+        ),
+    ] = None,
+    hf_login: Annotated[
+        bool,
+        typer.Option(
+            "--hf-login/--no-hf-login",
+            help="Let visitors sign in with Hugging Face to use their own account for Inference "
+            "Providers (the `inference-api` scope), instead of pasting a token.",
+        ),
+    ] = True,
     recreate: Annotated[
         bool,
         typer.Option(
@@ -325,6 +434,29 @@ def push(
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Show what would be pushed and stop.")
     ] = False,
+    share_endpoint: Annotated[
+        Optional[bool],
+        typer.Option("--share-endpoint/--no-share-endpoint", help=_SHARE_HELP),
+    ] = None,
+    visitor_endpoints: Annotated[
+        Optional[bool],
+        typer.Option("--visitor-endpoints/--no-visitor-endpoints", help=_VISITOR_HELP),
+    ] = None,
+    run_visibility: Annotated[
+        str, typer.Option("--run-visibility", help=_VISIBILITY_HELP)
+    ] = "",
+    run_history: Annotated[
+        Optional[bool],
+        typer.Option("--run-history/--no-run-history", help=_HISTORY_HELP),
+    ] = None,
+    add_datasets: Annotated[
+        Optional[bool],
+        typer.Option("--add-datasets/--no-add-datasets", help=_ADD_HELP),
+    ] = None,
+    rollouts: Annotated[
+        Optional[bool],
+        typer.Option("--rollouts/--no-rollouts", help=_ROLLOUTS_HELP),
+    ] = None,
 ) -> None:
     """Deploy this environment to a Hugging Face Space.
 
@@ -341,10 +473,28 @@ def push(
         raise typer.BadParameter("--repo-id is required, e.g. your-org/harbor-env")
 
     datasets = _split(dataset)
-    if not llm_url:
+    ui_variables = _ui_env(
+        share_endpoint,
+        visitor_endpoints,
+        run_visibility,
+        run_history,
+        add_datasets,
+        rollouts,
+    )
+    if share_endpoint is False and visitor_endpoints is False:
         raise typer.BadParameter(
-            "--llm-url is required: a Space with no engine cannot run anything, and finding "
-            "that out after deploying is worse than finding it out now."
+            "--no-share-endpoint with --no-visitor-endpoints leaves visitors no model to run with."
+        )
+    if not llm_url and visitor_endpoints is False:
+        raise typer.BadParameter(
+            "--llm-url is required with --no-visitor-endpoints: a Space with no engine of its own "
+            "that accepts none from visitors cannot run anything, and finding that out after "
+            "deploying is worse than finding it out now."
+        )
+    if not llm_url:
+        print(
+            "NOTE: no --llm-url. Visitors run rollouts on a model they connect themselves (a "
+            "Hugging Face token, or their own endpoint)."
         )
 
     if private:
@@ -372,7 +522,16 @@ def push(
     mounts = {spec: f"{_MOUNT_ROOT}/{spec.replace('/', '__')}" for spec in hf_specs}
 
     # Non-secret configuration travels as plain Space variables.
-    variables = {"OPENENV_LLM_URL": llm_url, "ENABLE_WEB_INTERFACE": "true"}
+    variables = {
+        "OPENENV_LLM_URL": llm_url,
+        "ENABLE_WEB_INTERFACE": "true",
+        **ui_variables,
+    }
+    if bucket:
+        # Where the UI puts datasets added from the page: a server-side copy into this bucket,
+        # read back through the mount, as for the datasets pushed here.
+        variables["OPENENV_HARBOR_BUCKET"] = bucket
+        variables["OPENENV_HARBOR_BUCKET_MOUNT"] = _MOUNT_ROOT
     if datasets:
         variables["OPENENV_DATASETS"] = ",".join(datasets)
     if model:
@@ -447,8 +606,9 @@ def push(
     if recreate:
         _delete_space(repo_id)
 
-    if bucket and hf_specs:
-        _fill_bucket(bucket, hf_specs)
+    if bucket:
+        # Created even with no datasets to copy: datasets added from the page go into it too.
+        _fill_bucket(bucket, hf_specs, public=public_bucket)
 
     with tempfile.TemporaryDirectory(prefix="openenv-harbor-push-") as tmp:
         staged = Path(tmp) / "env"
@@ -470,6 +630,8 @@ def push(
                     "__pycache__", "*.pyc", "forwarding.py", "cli"
                 ),
             )
+        if hf_login:
+            _enable_hf_login(staged / "README.md")
         _prune_removed_files(repo_id, staged)
         _push(
             directory=str(staged),
@@ -499,6 +661,33 @@ def push(
             value=",".join(mounts.get(d, d) for d in datasets),
         )
         print("mount     OPENENV_DATASETS switched to mount paths")
+
+
+# What visitors may sign in for: Inference Providers, billed to their own account. Nothing else.
+_HF_LOGIN = (
+    "hf_oauth: true",
+    "hf_oauth_scopes:",
+    "  - inference-api",
+    "hf_oauth_expiration_minutes: 480",
+)
+
+
+def _enable_hf_login(readme: Path) -> None:
+    """Turn on "Sign in with Hugging Face" for the Space, in its README front matter.
+
+    The Hub then provides the OAuth app (`OAUTH_CLIENT_ID` and friends), and the UI offers sign-in
+    as a way to use Inference Providers with the visitor's own account.
+    """
+    text = readme.read_text() if readme.is_file() else ""
+    if text.startswith("---"):
+        end = text.index("\n---", 3)
+        # Only the front matter counts: the README's own text may well mention `hf_oauth:`.
+        if any(line.startswith("hf_oauth:") for line in text[:end].splitlines()):
+            return
+        text = text[:end] + "\n" + "\n".join(_HF_LOGIN) + text[end:]
+    else:
+        text = "---\n" + "\n".join(_HF_LOGIN) + "\n---\n\n" + text
+    readme.write_text(text)
 
 
 def _prune_removed_files(repo_id: str, staged: Path) -> None:
@@ -636,8 +825,11 @@ def _delete_space(repo_id: str) -> None:
         print(f"recreate  nothing to delete ({type(exc).__name__})")
 
 
-def _fill_bucket(bucket: str, specs: list[str]) -> None:
+def _fill_bucket(bucket: str, specs: list[str], public: bool | None = None) -> None:
     """Create `bucket` if missing and copy each task suite into it, server side.
+
+    A new bucket is private unless `public` is `True`. An existing one keeps its visibility unless
+    `public` says otherwise: changing who can read a bucket is not something to do by default.
 
     `copy_files` copies by xet hash: the Hub moves the references, nothing is downloaded here and
     nothing is re-uploaded. That is the difference between seconds and the ~47k-file upload a local
@@ -649,7 +841,22 @@ def _fill_bucket(bucket: str, specs: list[str]) -> None:
     from huggingface_hub import HfApi
 
     api = HfApi()
-    api.create_bucket(bucket, private=False, exist_ok=True)
+    existing = None
+    with contextlib.suppress(Exception):
+        existing = api.bucket_info(bucket)
+    if existing is None:
+        api.create_bucket(bucket, private=not public, exist_ok=True)
+        print(f"bucket    {bucket} created ({'public' if public else 'private'})")
+    else:
+        private = bool(getattr(existing, "private", False))
+        if public is not None and private == public:
+            api.update_bucket_settings(bucket, private=not public)
+            print(f"bucket    {bucket} is now {'public' if public else 'private'}")
+        elif not private and public is None:
+            print(
+                f"bucket    {bucket} is PUBLIC. Anyone can read it, including run history if that is "
+                "on. Pass --private-bucket to make it private."
+            )
 
     try:
         present = {

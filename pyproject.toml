@@ -83,6 +83,7 @@ include-package-data = true
 "openenv.cli.importers" = ["templates/**/*"]
 "openenv.validation" = ["policies/*.json", "schemas/*.json"]
 "openenv.discovery" = ["schemas/**/*.json"]
+"openenv.harbor" = ["ui_assets/*"]
 
 [tool.setuptools.exclude-package-data]
 "*" = ["*.pyc", "*.pyo", "__pycache__/*"]

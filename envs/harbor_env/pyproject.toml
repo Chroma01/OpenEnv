@@ -16,6 +16,9 @@ dependencies = [
     "uvicorn[standard]>=0.24",
     "httpx>=0.27",
     "gradio>=5",
+    # "Sign in with Hugging Face" on a Space (Gradio's OAuth: the `gradio[oauth]` extra's two).
+    "authlib>=1.3",
+    "itsdangerous>=2.1",
 ]
 
 [project.scripts]
