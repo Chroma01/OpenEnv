@@ -427,6 +427,8 @@ def reads_environment(spec: str, index: int) -> bool:
     return False
 
 
+# Harbor expands only a whole value of `${VAR}` or `${VAR:-default}` (harbor.utils.env), so any `${`
+# is flagged; Docker Compose also expands a bare `$VAR`.
 _HARBOR_VAR = re.compile(r"\$\{")
 _COMPOSE_VAR = re.compile(r"\$(\{|[A-Za-z_])")
 

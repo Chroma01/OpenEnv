@@ -476,6 +476,23 @@ def test_tasks_that_read_the_server_environment_are_found(monkeypatch, tmp_path)
     assert ui_data.reads_environment("org/x", 0)
 
 
+def test_harbor_expands_only_braced_variables_in_task_toml(monkeypatch):
+    """Why `reads_environment` looks for `${` alone in task.toml: Harbor leaves a bare `$VAR` as is.
+
+    Compose is checked for bare `$VAR` too, since Docker Compose expands both forms.
+    """
+    env = pytest.importorskip("harbor.utils.env")
+    monkeypatch.setenv("HF_TOKEN", "secret")
+    resolved = env.resolve_env_vars(
+        {"bare": "$HF_TOKEN", "braced": "${HF_TOKEN}", "inline": "a $HF_TOKEN b"}
+    )
+    assert resolved == {
+        "bare": "$HF_TOKEN",
+        "braced": "secret",
+        "inline": "a $HF_TOKEN b",
+    }
+
+
 def test_one_visitor_cannot_hold_every_slot(monkeypatch, tmp_path):
     import asyncio
     import threading

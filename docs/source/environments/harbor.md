@@ -312,7 +312,9 @@ a Space), and some have a flag on `serve` and `push`.
 | Rollouts at once per visitor | `OPENENV_HARBOR_UI_MAX_RUNS_PER_VISITOR` | | 4 | 4 | 2 |
 
 `own` visibility ties runs to a random id kept in the visitor's browser; a run stores only a digest
-of it. Run history goes to `OPENENV_HARBOR_RUNS_DIR`, by default `~/.cache/openenv/harbor/runs`, or
+of it. That keeps visitors' runs apart, but it is not sign-in: a visitor who clears the browser's
+storage loses their runs, and it is no substitute for access control over traces you consider
+private. Run history goes to `OPENENV_HARBOR_RUNS_DIR`, by default `~/.cache/openenv/harbor/runs`, or
 `/data/harbor-runs` on a Space with the bucket mounted. `OPENENV_HARBOR_UI_MAX_ADD_GB` (default `5`)
 caps the size of a dataset added from the page.
 
