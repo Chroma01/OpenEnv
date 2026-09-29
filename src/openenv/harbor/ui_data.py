@@ -787,8 +787,9 @@ def _copy_to_bucket(
     """Copy a Hub dataset into the Space's bucket, server side, and wait for the mount to show it.
 
     The same copy `push` makes for the datasets it serves: by content hash, so nothing is downloaded
-    or uploaded and a suite of thousands of files takes seconds. The mount then shows the new folder,
-    which is waited for rather than assumed.
+    or uploaded and a suite of thousands of files takes seconds. Only `tasks/` is copied: it is all
+    the loader reads, the same folder a download fetches, and what the size check measured. The
+    mount then shows the new folder, which is waited for rather than assumed.
     """
     import time
 
@@ -797,7 +798,8 @@ def _copy_to_bucket(
     prefix = spec.replace("/", "__")
     job["state"] = "copying"
     HfApi().copy_files(
-        f"hf://datasets/{spec}/", f"hf://buckets/{settings.bucket}/{prefix}/"
+        f"hf://datasets/{spec}/tasks/",
+        f"hf://buckets/{settings.bucket}/{prefix}/tasks/",
     )
     job["state"] = "mounting"
     folder = settings.bucket_mount / prefix

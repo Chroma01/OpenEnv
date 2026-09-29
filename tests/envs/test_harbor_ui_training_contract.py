@@ -690,8 +690,9 @@ def test_page_adds_go_into_the_bucket_and_the_bucket_is_the_list(monkeypatch, tm
     monkeypatch.setattr("huggingface_hub.HfApi", Api)
     job = {}
     target = ui_data._copy_to_bucket("org/suite", settings, job, expected=1)
+    # only tasks/, the folder the loader reads and the size check measures, not the whole repository
     assert copies == [
-        ("hf://datasets/org/suite/", "hf://buckets/org/space/org__suite/")
+        ("hf://datasets/org/suite/tasks/", "hf://buckets/org/space/org__suite/tasks/")
     ]
     assert target == str(settings.bucket_mount / "org__suite")
     assert ui_data.added_spec("org/suite", settings) == target

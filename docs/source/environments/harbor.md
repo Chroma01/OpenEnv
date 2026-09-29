@@ -601,9 +601,9 @@ Two details that matter:
 disk is ephemeral, so a download is re-paid on every restart. `push` syncs the suites into a storage
 bucket named after the Space and mounts it at `/data`. The copy is server side, and re-running
 `push` copies only what is new. The bucket is created private (`--public-bucket` to change that),
-since with run history on it also holds every visitor's runs. With `--add-datasets`, a dataset added
-from the UI is copied into the same bucket, server side, and read through the mount, so it survives
-restarts; removing it deletes it from the bucket.
+since with run history on it also holds every visitor's runs. With `--add-datasets`, the `tasks/`
+folder of a dataset added from the UI is copied into the same bucket, server side, and read through
+the mount, so it survives restarts; removing it deletes it from the bucket.
 
 **Visitors can sign in with Hugging Face.** `push` turns on OAuth for the Space (`hf_oauth: true`,
 scope `inference-api`), and the UI offers "sign in with Hugging Face" as a way to use Inference
