@@ -520,13 +520,18 @@ def test_the_file_tree_lists_the_top_level_first_and_stops_at_the_cap(
     ):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text("x")
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.txt"
+    outside.write_text("not this task's")
+    (tmp_path / "tests" / "leak.txt").symlink_to(outside)
+    (tmp_path / "tests" / "same.sh").symlink_to(tmp_path / "tests" / "test.sh")
     files, cut = ui_data.file_tree(tmp_path)
     assert [f["path"] for f in files] == [
         "instruction.md",
         "task.toml",
         "environment/Dockerfile",
+        "tests/same.sh",
         "tests/test.sh",
-    ]
+    ], "a symlink within the task is listed, one out of it is not"
     assert not cut
     monkeypatch.setattr(ui_data, "MAX_TREE_FILES", 2)
     files, cut = ui_data.file_tree(tmp_path)

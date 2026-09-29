@@ -357,6 +357,9 @@ def file_tree(task_dir: Path) -> tuple[list[dict[str, Any]], bool]:
                 return files, True
             path = Path(folder) / name
             try:
+                # a symlink out of the task can't be opened (read_task_file); don't show its size either
+                if path.is_symlink() and not path.resolve().is_relative_to(root):
+                    continue
                 size = path.stat().st_size
             except OSError:
                 continue
