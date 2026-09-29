@@ -306,6 +306,9 @@ def test_settings_default_open_locally_and_closed_on_a_space(monkeypatch):
     space = ui_settings.load()
     assert space.run_visibility == "own" and space.max_runs_per_visitor == 2
     assert not space.private_urls and not space.run_history and not space.add_datasets
+    # Anyone with a Space's URL is a visitor: the operator's endpoint is shared only on request.
+    assert not space.server_endpoint and space.visitor_endpoints and space.rollouts
+    assert lan.server_endpoint and local.server_endpoint
     # The token on a Space is the operator's: no variable offers it to visitors.
     monkeypatch.setenv("OPENENV_HARBOR_UI_LOCAL_TOKEN", "1")
     assert not ui_settings.load().local_token
@@ -921,6 +924,16 @@ def test_push_keeps_buckets_private_unless_told(monkeypatch, capsys):
     assert changed == [] and "is PUBLIC" in capsys.readouterr().out
     harbor._fill_bucket("org/open", [], public=False)
     assert changed == [("org/open", True)]
+
+
+def test_push_refuses_a_space_whose_visitors_would_have_no_model():
+    """On a Space the endpoint is shared only when asked, so turning visitors' own models off needs it."""
+    from openenv.cli.commands.harbor import app
+    from typer.testing import CliRunner
+
+    args = ["push", "--repo-id", "org/space", "--llm-url", "http://engine:8000/v1"]
+    refused = CliRunner().invoke(app, [*args, "--no-visitor-endpoints"])
+    assert refused.exit_code != 0 and "needs --share-endpoint" in refused.output
 
 
 def test_push_turns_on_sign_in_in_the_space_readme(tmp_path):

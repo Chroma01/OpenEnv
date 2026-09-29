@@ -309,7 +309,7 @@ a Space), and some have a flag on `serve` and `push`.
 | setting | variable | flag | local | network | Space |
 |---|---|---|---|---|---|
 | Visitors may start rollouts | `OPENENV_HARBOR_UI_ROLLOUTS` | `--rollouts` | on | on | on |
-| Visitors may use the server's endpoint | `OPENENV_HARBOR_UI_SERVER_ENDPOINT` | `--share-endpoint` | on | on | on |
+| Visitors may use the server's endpoint | `OPENENV_HARBOR_UI_SERVER_ENDPOINT` | `--share-endpoint` | on | on | off |
 | Visitors may connect their own | `OPENENV_HARBOR_UI_VISITOR_ENDPOINTS` | `--visitor-endpoints` | on | on | on |
 | A visitor's URL may be private or local | `OPENENV_HARBOR_UI_PRIVATE_URLS` | | on | off | off |
 | Offer this machine's HF token | `OPENENV_HARBOR_UI_LOCAL_TOKEN` | | on | off | never |
@@ -469,7 +469,8 @@ Deploy the same server to a Hugging Face Space.
 
 `push` also takes the UI flags of `serve` (`--share-endpoint`, `--visitor-endpoints`,
 `--run-visibility`, `--run-history`, `--add-datasets`, `--rollouts`) and sets them as Space
-variables.
+variables. Unlike `serve`, it doesn't share the endpoint with UI visitors unless `--share-endpoint` is
+given.
 
 ```bash
 openenv harbor push --llm-url $LLM --dataset org/train,org/eval \
@@ -616,6 +617,10 @@ restarts; removing it deletes it from the bucket.
 scope `inference-api`), and the UI offers "sign in with Hugging Face" as a way to use Inference
 Providers on the visitor's own account instead of pasting a token. It is optional and not needed
 for anything else; `--no-hf-login` leaves it out.
+
+**Visitors bring their own model.** On a Space, a visitor runs on a model they connect: signing in
+with Hugging Face, a token, or their own endpoint. `--share-endpoint` lets them use the Space's own
+endpoint and key too, at your cost; the Task API and MCP use it either way.
 
 **Rollouts on a Space use the Space's credentials for sandboxes.** An `hf-sandbox` rollout is billed
 to the `HF_TOKEN` the Space holds, whoever started it. `--no-rollouts` makes a public deployment a

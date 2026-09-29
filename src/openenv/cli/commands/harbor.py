@@ -76,6 +76,10 @@ _SHARE_HELP = (
     "Let visitors of the UI run on this server's endpoint and key. --no-share-endpoint makes each "
     "visitor connect their own model. Default: shared."
 )
+_SHARE_HELP_PUSH = (
+    "Let visitors of the Space's UI run on its endpoint and key, at your cost. Default: not shared, "
+    "so each visitor connects their own model (signing in with Hugging Face, a token, or an endpoint)."
+)
 _VISITOR_HELP = (
     "Let visitors connect their own model in the UI: a Hugging Face token and model, or any "
     "OpenAI-compatible URL such as vLLM. Default: allowed."
@@ -436,7 +440,7 @@ def push(
     ] = False,
     share_endpoint: Annotated[
         Optional[bool],
-        typer.Option("--share-endpoint/--no-share-endpoint", help=_SHARE_HELP),
+        typer.Option("--share-endpoint/--no-share-endpoint", help=_SHARE_HELP_PUSH),
     ] = None,
     visitor_endpoints: Annotated[
         Optional[bool],
@@ -481,9 +485,11 @@ def push(
         add_datasets,
         rollouts,
     )
-    if share_endpoint is False and visitor_endpoints is False:
+    if not share_endpoint and visitor_endpoints is False:
+        # On a Space the endpoint is shared only when asked, so unset counts as not shared.
         raise typer.BadParameter(
-            "--no-share-endpoint with --no-visitor-endpoints leaves visitors no model to run with."
+            "--no-visitor-endpoints needs --share-endpoint: on a Space visitors use its endpoint "
+            "only when it is shared, so they would have no model to run with."
         )
     if not llm_url and visitor_endpoints is False:
         raise typer.BadParameter(
@@ -495,6 +501,11 @@ def push(
         print(
             "NOTE: no --llm-url. Visitors run rollouts on a model they connect themselves (a "
             "Hugging Face token, or their own endpoint)."
+        )
+    elif share_endpoint is None:
+        print(
+            "NOTE: UI visitors connect their own model; the endpoint serves the Task API and MCP. "
+            "Pass --share-endpoint to let them run on it too, at your cost."
         )
 
     if private:

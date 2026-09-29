@@ -5,7 +5,7 @@ this?" differs between the two. On a laptop the visitor is the operator: they wa
 have made, their vLLM on localhost, their own Hugging Face token. On a public Space the visitor is
 anyone with the URL: they should see their own runs rather than everyone's, never make the server
 call an address on its private network, and spend the operator's key only if the operator says so
-(`server_endpoint`, on by default; a Space that turns it off makes every visitor bring their own).
+(`server_endpoint`: off on a Space unless turned on, so each visitor brings their own model).
 
 Only a server that listens on loopback alone gets the laptop defaults. `openenv harbor serve` binds
 0.0.0.0 unless told otherwise, and then everyone on the network is a visitor too, so it is treated
@@ -89,7 +89,8 @@ def load() -> UISettings:
         on_space=space,
         exposed=exposed,
         rollouts=_flag("OPENENV_HARBOR_UI_ROLLOUTS", True),
-        server_endpoint=_flag("OPENENV_HARBOR_UI_SERVER_ENDPOINT", True),
+        # On a Space anyone with the URL is a visitor, so the operator's key is theirs only on request.
+        server_endpoint=_flag("OPENENV_HARBOR_UI_SERVER_ENDPOINT", not space),
         visitor_endpoints=_flag("OPENENV_HARBOR_UI_VISITOR_ENDPOINTS", True),
         private_urls=_flag("OPENENV_HARBOR_UI_PRIVATE_URLS", not exposed),
         # Never on a Space: the token there is the operator's secret, and whether visitors may spend
@@ -147,7 +148,7 @@ ROWS = (
         "Use this server's endpoint",
         "OPENENV_HARBOR_UI_SERVER_ENDPOINT",
         "--share-endpoint",
-        "Visitors may run on the endpoint and key the server started with. Off, each visitor brings their own.",
+        "Visitors may run on the endpoint and key the server started with. Default on, except on a Space. Off, each visitor brings their own.",
     ),
     Row(
         "visitor_endpoints",
