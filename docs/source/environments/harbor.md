@@ -329,9 +329,10 @@ What the UI guarantees whatever the settings:
 - With private URLs off, a visitor's URL, and every redirect it answers with, must resolve to public
   addresses, and is checked again before each rollout.
 - Every dataset, task and file the page asks for is one the server serves or that was added from
-  the page; a file path cannot leave its task directory, and the files the page reads by itself
-  (`task.toml`, `instruction.md`) are never read through a link. A dataset added from the page may
-  not contain a symbolic link at all.
+  the page. Every file it reads, for a card, the task view, the file viewer or the environment
+  check, must resolve inside the dataset's own folder (a link to that folder itself is followed),
+  so a task reached through a link to anywhere else shows nothing and cannot run on a visitor's
+  model. A dataset added from the page may not contain a symbolic link at all.
 - A task that reads the server's environment variables (`${VAR}` in `task.toml` or a compose file,
   or a bare name under a compose `environment:`), which is where the server's keys are, or its files
   (a compose `env_file`, `include`, `extends`, or a host path in a mount, secret, build context,

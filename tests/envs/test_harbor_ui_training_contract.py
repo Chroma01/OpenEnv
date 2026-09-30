@@ -487,6 +487,8 @@ def test_tasks_that_read_the_server_environment_are_found(monkeypatch, tmp_path)
     monkeypatch.setattr(
         "openenv.harbor.tasks.HarborTaskProvider.task_dir", lambda *a: task
     )
+    # the fake task folder is under tmp_path, so that is its dataset's folder
+    monkeypatch.setattr(ui_data, "_dataset_folder", lambda spec: tmp_path.resolve())
     assert not ui_data.reads_environment("org/x", 0)
     (task / "environment" / "docker-compose.yaml").write_text(
         "environment:\n  - T=$HF_TOKEN\n"
@@ -553,6 +555,8 @@ def test_a_compose_file_that_reads_the_host_is_found(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "openenv.harbor.tasks.HarborTaskProvider.task_dir", lambda *a: task
     )
+    # the fake task folder is under tmp_path, so that is its dataset's folder
+    monkeypatch.setattr(ui_data, "_dataset_folder", lambda spec: tmp_path.resolve())
     included = (
         task / "environment" / "sub" / "base.yaml"
     )  # one compose file can include another
@@ -618,6 +622,8 @@ def test_env_reads_are_found_in_what_harbor_and_compose_decode(monkeypatch, tmp_
     monkeypatch.setattr(
         "openenv.harbor.tasks.HarborTaskProvider.task_dir", lambda *a: task
     )
+    # the fake task folder is under tmp_path, so that is its dataset's folder
+    monkeypatch.setattr(ui_data, "_dataset_folder", lambda spec: tmp_path.resolve())
     toml, compose = task / "task.toml", task / "environment" / "docker-compose.yaml"
     toml.write_text("[verifier]\ntimeout_sec = 60\n")
 
@@ -949,7 +955,7 @@ def test_a_removed_dataset_cannot_be_recached_by_inflight_indexing(
     task.mkdir()
     started, release = threading.Event(), threading.Event()
 
-    def row(index, path):
+    def row(index, path, spec=None):
         started.set()
         assert release.wait(1)
         return {"index": index, "name": path.name, "title": path.name, "paragraphs": []}
@@ -1532,6 +1538,8 @@ def test_a_link_in_a_task_counts_as_reading_the_host(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "openenv.harbor.tasks.HarborTaskProvider.task_dir", lambda *a: task
     )
+    # the fake task folder is under tmp_path, so that is its dataset's folder
+    monkeypatch.setattr(ui_data, "_dataset_folder", lambda spec: tmp_path.resolve())
     assert not ui_data.reads_environment("org/x", 0)
     (task / "environment" / "compose.yaml").symlink_to(host / "compose.yaml")
     assert ui_data.reads_environment("org/x", 0), "a compose file that is a link"
@@ -1539,3 +1547,50 @@ def test_a_link_in_a_task_counts_as_reading_the_host(monkeypatch, tmp_path):
     (task / "task.toml").unlink()
     (task / "task.toml").symlink_to(host / "compose.yaml")
     assert ui_data.reads_environment("org/x", 0), "a task.toml that is a link"
+
+
+def test_a_served_dataset_is_read_only_inside_its_own_folder(tmp_path):
+    """Every read the page makes (card text, file tree, file viewer, environment check) is
+    anchored on the dataset's folder: a link to anywhere else, at any level, is not followed. The
+    folder itself may be a link, which is the operator's own choice."""
+    from openenv.harbor import ui_data
+
+    host = tmp_path / "host"
+    (host / "t").mkdir(parents=True)
+    for folder in (host, host / "t"):
+        (folder / "instruction.md").write_text("server secret\n")
+        (folder / "task.toml").write_text('[task]\nname = "server secret"\n')
+        (folder / "token").write_text("hf_server_secret\n")
+
+    def dataset(name):
+        tasks = tmp_path / name / "tasks"
+        (tasks / "own").mkdir(parents=True)
+        (tasks / "own" / "instruction.md").write_text("Do the task.\n")
+        (tasks / "own" / "task.toml").write_text("")
+        return tasks
+
+    (dataset("linked-task") / "stolen").symlink_to(host)  # a task folder that is a link
+    linked_tasks = tmp_path / "linked-tasks"
+    linked_tasks.mkdir()
+    (linked_tasks / "tasks").symlink_to(host)  # `tasks/` itself is a link
+    dataset("real")
+    (tmp_path / "current").symlink_to(
+        tmp_path / "real"
+    )  # the operator's own link: followed
+
+    for spec in (str(tmp_path / "linked-task"), str(linked_tasks)):
+        ui_data._forget(spec)
+        rows = ui_data.task_rows(spec)
+        assert "server secret" not in str(rows), spec
+        for row in rows:
+            detail = ui_data.task_detail(spec, row["index"])
+            assert "server secret" not in str(detail), spec
+            assert "error" in ui_data.read_task_file(spec, row["index"], "token"), spec
+        stolen = [r["index"] for r in rows if r["name"] in ("stolen", "t")]
+        assert stolen and all(ui_data.reads_environment(spec, i) for i in stolen), spec
+    spec = str(tmp_path / "current")
+    ui_data._forget(spec)
+    detail = ui_data.task_detail(spec, 0)
+    assert "Do the task." in detail["instruction"] and detail["files"]
+    assert "text" in ui_data.read_task_file(spec, 0, "instruction.md")
+    assert not ui_data.reads_environment(spec, 0)

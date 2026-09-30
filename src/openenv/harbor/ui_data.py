@@ -45,13 +45,39 @@ def _hub_not_found(exc: Exception) -> bool:
     return getattr(response, "status_code", None) == 404
 
 
-def _own(task_dir: Path, name: str) -> Path:
-    """`task_dir / name`, for a file the page reads by itself. A link is refused, the file or the
-    task folder it is read through, since it can point anywhere on this machine; callers already
-    treat an `OSError` as a missing file."""
-    path = task_dir / name
-    if task_dir.is_symlink() or path.is_symlink():
-        raise OSError(f"{name} is read through a symbolic link")
+def _dataset_folder(spec: str) -> Path | None:
+    """The folder a dataset's files must stay in, with a link to the folder itself followed (an
+    operator may serve `~/datasets/current`). `None` for a Harbor registry dataset, whose tasks
+    live in Harbor's own cache."""
+    from . import tasks
+
+    path = Path(spec).expanduser()
+    if path.is_dir():
+        return path.resolve()
+    if tasks._is_hf_repo(spec):
+        return (tasks._DATASET_ROOT / spec.replace("/", "__")).resolve()
+    return None
+
+
+def task_root(spec: str | None, task_dir: Path) -> Path | None:
+    """The one folder the page reads a task's files from: `task_dir` resolved, or `None` when a
+    link (the task folder, `tasks/`, anything between) takes it outside its dataset, and then
+    nothing in it is read. Without a dataset to anchor on, the task folder may not be a link."""
+    real = task_dir.resolve()
+    folder = _dataset_folder(spec) if spec else None
+    if folder is None:
+        return None if task_dir.is_symlink() else real
+    return real if real.is_relative_to(folder) else None
+
+
+def _own(root: Path | None, name: str) -> Path:
+    """`root / name`, for a file the page reads by itself, when it resolves inside the task's root
+    (see `task_root`); callers already treat an `OSError` as a missing file."""
+    if root is None:
+        raise OSError("this task's folder is outside its dataset")
+    path = root / name
+    if not path.resolve().is_relative_to(root):
+        raise OSError(f"{name} points outside its task")
     return path
 
 
@@ -81,14 +107,14 @@ def _links_a_task(dataset: Path) -> bool:
         return any(entry.is_symlink() for entry in entries)
 
 
-def _toml(task_dir: Path) -> dict[str, Any]:
+def _toml(task_dir: Path | None) -> dict[str, Any]:
     try:
         return tomllib.loads(_own(task_dir, "task.toml").read_text(errors="replace"))
     except (OSError, tomllib.TOMLDecodeError):
         return {}
 
 
-def _first_line(task_dir: Path, limit: int = 160) -> str:
+def _first_line(task_dir: Path | None, limit: int = 160) -> str:
     """The first meaningful line of the instruction, used as a title when a task declares none."""
     try:
         with _own(task_dir, "instruction.md").open(errors="replace") as fh:
@@ -106,7 +132,7 @@ _MD = re.compile(
 )
 
 
-def _paragraphs(task_dir: Path, limit: int = 3, chars: int = 360) -> list[str]:
+def _paragraphs(task_dir: Path | None, limit: int = 3, chars: int = 360) -> list[str]:
     """The instruction's first few prose paragraphs as plain text, headings and code left out.
 
     Only the start of the file is read: a brief is two lines on a card.
@@ -144,7 +170,7 @@ def _strings(value: Any) -> list[str]:
     return []
 
 
-def task_row(index: int, task_dir: Path) -> dict[str, Any]:
+def task_row(index: int, task_dir: Path, spec: str | None = None) -> dict[str, Any]:
     """One task as the task list shows it.
 
     Harbor's schema fixes `[task]` (name, description, keywords) but leaves `[metadata]` free-form,
@@ -156,16 +182,19 @@ def task_row(index: int, task_dir: Path) -> dict[str, Any]:
             The task's position in its dataset, which is its identity everywhere downstream.
         task_dir (`Path`):
             The task directory.
+        spec (`str`, *optional*):
+            Its dataset, which every file read must stay inside (`task_root`).
 
     Returns:
         `dict` with `index`, `name`, `title`, `category`, `difficulty` and `keywords`.
     """
-    doc = _toml(task_dir)
+    root = task_root(spec, task_dir)
+    doc = _toml(root)
     task, meta = doc.get("task") or {}, doc.get("metadata") or {}
     title = (
         meta.get("title")
         or task.get("description")
-        or _first_line(task_dir)
+        or _first_line(root)
         or task_dir.name
     )
     keywords: list[str] = []
@@ -179,7 +208,7 @@ def task_row(index: int, task_dir: Path) -> dict[str, Any]:
         "category": str(meta.get("category") or meta.get("domain") or ""),
         "difficulty": str(meta.get("difficulty") or meta.get("difficulty_tier") or ""),
         "keywords": keywords[:8],
-        "paragraphs": _paragraphs(task_dir),
+        "paragraphs": _paragraphs(root),
     }
 
 
@@ -233,7 +262,9 @@ def task_rows(spec: str) -> list[dict[str, Any]]:
         dirs = resolve_task_dirs(spec)
         workers = int(os.environ.get("OPENENV_UI_INDEX_WORKERS", "16"))
         with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-            rows = list(pool.map(lambda pair: task_row(*pair), enumerate(dirs)))
+            rows = list(
+                pool.map(lambda pair: task_row(*pair, spec=spec), enumerate(dirs))
+            )
         _briefs(rows)
     except BaseException:
         with _ROWS_LOCK:
@@ -440,14 +471,15 @@ def task_detail(spec: str, index: int) -> dict[str, Any]:
         `files_truncated`.
     """
     task_dir = HarborTaskProvider([spec]).task_dir(spec, int(index))
-    doc = _toml(task_dir)
+    root = task_root(spec, task_dir)
+    doc = _toml(root)
     try:
-        instruction = _own(task_dir, "instruction.md").read_text(errors="replace")
+        instruction = _own(root, "instruction.md").read_text(errors="replace")
     except OSError:
         instruction = ""
     shown, hidden = _metadata(doc)
-    files, truncated = file_tree(task_dir)
-    row = task_row(int(index), task_dir)
+    files, truncated = file_tree(root) if root is not None else ([], False)
+    row = task_row(int(index), task_dir, spec)
     row.pop("paragraphs", None)
     return {
         **row,
@@ -483,12 +515,14 @@ def reads_environment(spec: str, index: int) -> bool:
     """
     import yaml
 
-    task_dir = HarborTaskProvider([spec]).task_dir(spec, int(index))
-    env_dir = task_dir / "environment"
+    root = task_root(spec, HarborTaskProvider([spec]).task_dir(spec, int(index)))
+    if root is None:
+        return True  # a link takes the task outside its dataset
+    env_dir = root / "environment"
+    toml_path = root / "task.toml"
     # A link can put any file on this machine where the task reads its own.
-    if any(p.is_symlink() for p in (task_dir, task_dir / "task.toml", env_dir)):
+    if any(not p.resolve().is_relative_to(root) for p in (toml_path, env_dir)):
         return True
-    toml_path = task_dir / "task.toml"
     if toml_path.is_file():
         try:
             text = toml_path.read_text()
@@ -498,7 +532,7 @@ def reads_environment(spec: str, index: int) -> bool:
         if _HARBOR_VAR.search(text) or any("${" in s for s in _every_string(data)):
             return True
     for path in sorted(env_dir.rglob("*")) if env_dir.is_dir() else []:
-        if path.is_symlink():
+        if not path.resolve().is_relative_to(root):
             return True
         if path.suffix not in (".yml", ".yaml") or not path.is_file():
             continue
@@ -693,9 +727,9 @@ def read_task_file(spec: str, index: int, path: str) -> dict[str, Any]:
         `dict` with `path`, `size`, and either `text` (possibly `truncated`) or `binary: True`, or
         `error` when the path is refused or missing.
     """
-    root = HarborTaskProvider([spec]).task_dir(spec, int(index)).resolve()
-    target = (root / str(path)).resolve()
-    if not target.is_relative_to(root) or not target.is_file():
+    root = task_root(spec, HarborTaskProvider([spec]).task_dir(spec, int(index)))
+    target = (root / str(path)).resolve() if root is not None else None
+    if target is None or not target.is_relative_to(root) or not target.is_file():
         return {"path": path, "error": "not a file in this task"}
     size = target.stat().st_size
     with target.open("rb") as fh:
