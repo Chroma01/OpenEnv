@@ -231,8 +231,9 @@ def test_native_session_exports_all_agent_roots_without_auxiliary_calls():
 
 
 @pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("choice_ids", [False, True])
 def test_native_proxy_http_capture_reaches_training_contract(
-    monkeypatch, tmp_path, stream
+    monkeypatch, tmp_path, stream, choice_ids
 ):
     from functools import partial
 
@@ -244,7 +245,12 @@ def test_native_proxy_http_capture_reaches_training_contract(
     from opencode_env.task import OpenCodeTask
 
     policy = training_sampling({"temperature": 0.7})
-    logprobs = {"content": [{"token": "token_id:20", "logprob": -0.25}]}
+    logprobs = {
+        "content": [
+            {"token": "answer" if choice_ids else "token_id:20", "logprob": -0.25}
+        ]
+    }
+    ids = {"token_ids": [20]} if choice_ids else {}
 
     def engine(request):
         body = json.loads(request.content)
@@ -252,6 +258,8 @@ def test_native_proxy_http_capture_reaches_training_contract(
         assert body["logprobs"] is True
         assert body["return_tokens_as_token_ids"] is True
         assert body["return_token_ids"] is True
+        if body["messages"][0]["content"] == "fail":
+            return httpx.Response(400, json={"error": {"message": "rejected request"}})
         if stream:
             chunks = [
                 {
@@ -261,6 +269,7 @@ def test_native_proxy_http_capture_reaches_training_contract(
                             "index": 0,
                             "delta": {"content": "answer"},
                             "logprobs": logprobs,
+                            **ids,
                         }
                     ],
                 },
@@ -281,6 +290,7 @@ def test_native_proxy_http_capture_reaches_training_contract(
                     {
                         "message": {"role": "assistant", "content": "answer"},
                         "logprobs": logprobs,
+                        **ids,
                         "finish_reason": "stop",
                     }
                 ],
@@ -297,6 +307,15 @@ def test_native_proxy_http_capture_reaches_training_contract(
         upstream_url="http://engine", trace_path=str(path), sampling=policy
     )
     with TestClient(interception._build_app(config)) as client:
+        failed = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test",
+                "stream": stream,
+                "messages": [{"role": "user", "content": "fail"}],
+            },
+        )
+        assert failed.status_code == 400
         response = client.post(
             "/v1/chat/completions",
             json={
@@ -322,9 +341,115 @@ def test_native_proxy_http_capture_reaches_training_contract(
         verifier=None,
         proxy_trace_path=str(path),
     )
+    assert len(session.fetch_proxy_trace()) == 2
     trace = session.fetch_training_trace()
     assert len(trace.turns) == 1
     assert trace.turns[0].prompt_token_ids == [10]
     assert trace.turns[0].completion_token_ids == [20]
     assert trace.turns[0].per_token_logps == [-0.25]
     assert trace.turns[0].loss_mask == [0, 1]
+
+
+@pytest.mark.parametrize("response", [{}, {"choices": []}])
+def test_missing_successful_response_is_not_silently_skipped(response):
+    from opencode_env.config import OpenCodeConfig
+    from opencode_env.harness import OpenCodeSession
+    from opencode_env.task import OpenCodeTask
+
+    session = OpenCodeSession(
+        sandbox=MagicMock(
+            read_text=lambda _: json.dumps({"request": {}, "response": response})
+        ),
+        config=OpenCodeConfig(base_url="http://unused"),
+        task=OpenCodeTask.coerce("task"),
+        proxy_trace_path="trace",
+    )
+    with pytest.raises(ValueError, match="no response choices"):
+        session.fetch_training_trace()
+
+
+def test_all_failed_upstream_calls_remain_a_transport_failure():
+    from opencode_env.config import OpenCodeConfig
+    from opencode_env.harness import OpenCodeSession
+    from opencode_env.task import OpenCodeTask
+
+    session = OpenCodeSession(
+        sandbox=MagicMock(
+            read_text=lambda _: json.dumps(
+                {"request": {}, "response": {"error": "unavailable"}}
+            )
+        ),
+        config=OpenCodeConfig(base_url="http://unused"),
+        task=OpenCodeTask.coerce("task"),
+        proxy_trace_path="trace",
+    )
+    with pytest.raises(RuntimeError, match="no successful model calls"):
+        session.fetch_training_trace()
+
+
+def test_streamed_choice_ids_accumulate_across_chunks_without_reparsing_text():
+    from opencode_env.sandbox.interception import (
+        _accumulate_stream_chunk,
+        _assemble_streamed_response,
+        _build_turn_record,
+    )
+
+    acc = {
+        "content_by_idx": {},
+        "tool_calls_by_idx": {},
+        "finish_by_idx": {},
+        "logprobs_by_idx": {},
+    }
+    for token in [20, 21]:
+        _accumulate_stream_chunk(
+            {
+                "prompt_token_ids": [10],
+                "choices": [
+                    {
+                        "index": 0,
+                        "token_ids": [token],
+                        "delta": {"content": "token_id:literal"},
+                        "logprobs": {
+                            "content": [{"token": "token_id:literal", "logprob": -0.25}]
+                        },
+                    }
+                ],
+            },
+            acc,
+        )
+    record = _build_turn_record(
+        turn_idx=1,
+        request_body={},
+        response_json=_assemble_streamed_response({}, acc),
+        latency_s=0.1,
+    )
+    assert record.completion_token_ids == [20, 21]
+    assert record.per_token_logps == [-0.25, -0.25]
+
+
+def test_choice_token_logprob_mismatch_is_not_truncated():
+    from opencode_env.sandbox.interception import _build_turn_record
+
+    record = _build_turn_record(
+        turn_idx=1,
+        request_body={},
+        response_json={
+            "prompt_token_ids": [10],
+            "choices": [
+                {
+                    "token_ids": [20, 21],
+                    "logprobs": {"content": [{"token": "answer", "logprob": -0.25}]},
+                }
+            ],
+        },
+        latency_s=0.1,
+    )
+    assert record.completion_token_ids == [20, 21]
+    with pytest.raises(ValueError):
+        TrainingTurn(
+            node_id="call",
+            prompt_token_ids=record.prompt_token_ids,
+            completion_token_ids=record.completion_token_ids,
+            per_token_logps=record.per_token_logps,
+            loss_mask=[0, 1, 1],
+        )

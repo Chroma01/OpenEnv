@@ -193,7 +193,19 @@ class OpenCodeSession(ResourceSession):
         graph = RolloutGraph()
         for entry in records:
             request = entry["request"]
-            choice = entry["response"]["choices"][0]
+            response = entry["response"]
+            if (
+                response.get("upstream_status", 200) >= 400
+                or response.get("upstream_error")
+                or response.get("error")
+            ):
+                if entry.get("completion_token_ids"):
+                    raise ValueError("failed upstream call contains sampled tokens")
+                continue
+            choices = response.get("choices") or []
+            if not choices:
+                raise ValueError("successful capture has no response choices")
+            choice = choices[0]
             graph.add_turn(
                 TurnNode(
                     node_id=str(entry["turn"]),
@@ -207,6 +219,8 @@ class OpenCodeSession(ResourceSession):
                     finish_reason=entry.get("finish_reason"),
                 )
             )
+        if not graph.nodes():
+            raise RuntimeError("rollout produced no successful model calls")
         document = export_session(
             SimpleNamespace(
                 graph=graph,

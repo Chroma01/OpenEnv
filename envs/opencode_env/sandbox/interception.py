@@ -257,7 +257,11 @@ async def _proxy_unary(
     record = _build_turn_record(
         turn_idx=turn_idx,
         request_body=forwarded_body,
-        response_json=response_json,
+        response_json=(
+            {**response_json, "upstream_status": upstream_response.status_code}
+            if upstream_response.status_code >= 400
+            else response_json
+        ),
         latency_s=latency,
     )
     trace_file.write(record.to_json() + "\n")
@@ -375,6 +379,10 @@ def _accumulate_stream_chunk(chunk: dict[str, Any], acc: dict[str, Any]) -> None
         idx = choice.get("index", 0)
         if choice.get("prompt_token_ids") is not None:
             acc["prompt_token_ids"] = choice["prompt_token_ids"]
+        if choice.get("token_ids") is not None:
+            acc.setdefault("token_ids_by_idx", {}).setdefault(idx, []).extend(
+                choice["token_ids"]
+            )
         delta = choice.get("delta") or {}
         content = delta.get("content")
         if content:
@@ -419,6 +427,7 @@ def _assemble_streamed_response(
         | set(acc["finish_by_idx"])
         | {k[0] for k in acc["tool_calls_by_idx"]}
         | set(acc["logprobs_by_idx"])
+        | set(acc.get("token_ids_by_idx", {}))
         | {0}
     )
     choices: list[dict[str, Any]] = []
@@ -444,6 +453,8 @@ def _assemble_streamed_response(
         }
         if acc["logprobs_by_idx"].get(idx):
             choice["logprobs"] = {"content": acc["logprobs_by_idx"][idx]}
+        if idx in acc.get("token_ids_by_idx", {}):
+            choice["token_ids"] = acc["token_ids_by_idx"][idx]
         choices.append(choice)
     return {
         "id": last_chunk.get("id", ""),
@@ -469,16 +480,16 @@ def _build_turn_record(
     content_lp = logprobs_field.get("content") or []
 
     tokens: list[str] = []
-    token_ids: list[int] = []
+    token_ids: list[int] = list(choice.get("token_ids") or [])
     per_token_logps: list[float] = []
     for entry in content_lp:
         tokens.append(entry.get("token", ""))
-        # OpenAI returns no raw token ids; vLLM returns them as ``token_id``.
-        token_id = entry.get("token_id")
-        if token_id is None and str(entry.get("token", "")).startswith("token_id:"):
-            token_id = int(entry["token"].removeprefix("token_id:"))
-        if token_id is not None:
-            token_ids.append(int(token_id))
+        if choice.get("token_ids") is None:
+            token_id = entry.get("token_id")
+            if token_id is None and str(entry.get("token", "")).startswith("token_id:"):
+                token_id = int(entry["token"].removeprefix("token_id:"))
+            if token_id is not None:
+                token_ids.append(int(token_id))
         lp = entry.get("logprob")
         if lp is not None:
             per_token_logps.append(float(lp))
