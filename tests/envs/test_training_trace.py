@@ -193,6 +193,7 @@ def test_native_policy_overrides_harness_before_generation():
     assert all(forwarded[k] == v for k, v in policy.items())
     assert forwarded["logprobs"] is True
     assert forwarded["return_tokens_as_token_ids"] is True
+    assert forwarded["return_token_ids"] is True
 
 
 def test_native_session_exports_all_agent_roots_without_auxiliary_calls():
@@ -250,6 +251,7 @@ def test_native_proxy_http_capture_reaches_training_contract(
         assert all(body[key] == value for key, value in policy.items())
         assert body["logprobs"] is True
         assert body["return_tokens_as_token_ids"] is True
+        assert body["return_token_ids"] is True
         if stream:
             chunks = [
                 {

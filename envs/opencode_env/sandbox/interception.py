@@ -182,6 +182,7 @@ def _prepare_forwarded_body(body: dict[str, Any], cfg: ProxyConfig) -> dict[str,
         forwarded.update(cfg.sampling)
         forwarded["logprobs"] = True
         forwarded["return_tokens_as_token_ids"] = True
+        forwarded["return_token_ids"] = True
     forwarded.setdefault("logprobs", True)
     forwarded.setdefault("top_logprobs", cfg.top_logprobs)
 
