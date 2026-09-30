@@ -766,7 +766,6 @@ def hub_summary(spec: str) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - Hub exception types vary across supported clients
         if not _hub_not_found(exc):
             raise
-    size = None
     size = getattr(api.dataset_info(spec), "used_storage", None)
     return {"tasks": tasks, "bytes": size}
 
