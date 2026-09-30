@@ -1235,6 +1235,39 @@ def test_push_removes_omitted_ui_overrides(monkeypatch):
     assert deleted == ["OPENENV_HARBOR_UI_SERVER_ENDPOINT"]
 
 
+def test_the_hub_floor_has_every_call_push_makes():
+    """The fakes above define `update_bucket_settings` whatever the version, so check the real
+    contract: both floors exclude 1.28, the last release without it, and the installed client has
+    every bucket and Space call `push` makes."""
+    import tomllib
+    from pathlib import Path
+
+    from huggingface_hub import HfApi
+    from packaging.requirements import Requirement
+
+    root = Path(__file__).parents[2]
+    for pyproject in (root / "pyproject.toml", root / "envs/harbor_env/pyproject.toml"):
+        deps = tomllib.loads(pyproject.read_text())["project"]["dependencies"]
+        hub = next(
+            r
+            for r in map(Requirement, deps)
+            if r.name.replace("-", "_") == "huggingface_hub"
+        )
+        assert hub.specifier.contains("1.29.0"), pyproject
+        assert not hub.specifier.contains("1.28.0"), pyproject
+    for call in (
+        "bucket_info",
+        "create_bucket",
+        "update_bucket_settings",
+        "list_bucket_tree",
+        "copy_files",
+        "batch_bucket_files",
+        "get_space_variables",
+        "delete_space_variable",
+    ):
+        assert callable(getattr(HfApi, call, None)), call
+
+
 def test_push_refuses_a_space_whose_visitors_would_have_no_model():
     """On a Space the endpoint is shared only when asked, so turning visitors' own models off needs it."""
     import re
