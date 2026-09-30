@@ -1439,3 +1439,74 @@ def test_serve_can_allow_private_urls_on_any_bind_address():
     }
     assert harbor._ui_env(None, None, "", None) == {}
     assert "OPENENV_HARBOR_UI_PRIVATE_URLS" not in harbor._UI_VARIABLES
+
+
+def test_a_dataset_with_a_link_is_not_added(monkeypatch, tmp_path):
+    """A link in a Hub dataset could point a task, or the files the page shows by itself, at
+    anything on the server. The add is refused, and what was copied is removed."""
+    import time
+
+    from openenv.harbor import tasks, ui_data
+
+    secret = tmp_path / "host" / "notes"
+    secret.mkdir(parents=True)
+    (secret / "task.toml").write_text('[task]\nname = "stolen"\n')
+    monkeypatch.setattr(tasks, "_DATASET_ROOT", tmp_path / "cache")
+
+    def download(spec, tqdm_class=None):
+        suite = tasks._DATASET_ROOT / spec.replace("/", "__") / "tasks"
+        (suite / "fine").mkdir(parents=True)
+        (suite / "fine" / "task.toml").write_text("")
+        (suite / "linked").symlink_to(secret)  # a flat task folder that is a link
+        return [suite / "fine", suite / "linked"]
+
+    removed, added = [], []
+    monkeypatch.setattr(ui_data, "hub_summary", lambda spec: {"tasks": 2, "bytes": 10})
+    monkeypatch.setattr(ui_data, "resolve_task_dirs", download)
+    monkeypatch.setattr(
+        ui_data, "remove_added", lambda spec, settings: removed.append(spec)
+    )
+    ui_data._JOBS.pop("org/linked", None)
+    ui_data.start_add("org/linked", on_added=added.append)
+    for _ in range(200):
+        job = ui_data.add_status("org/linked")
+        if job["state"] in ("error", "done"):
+            break
+        time.sleep(0.02)
+    assert job["state"] == "error" and "symbolic link" in job["error"], job
+    assert removed == ["org/linked"] and added == []
+
+
+def test_the_page_reads_no_file_through_a_link(tmp_path):
+    from openenv.harbor import ui_data
+
+    host = tmp_path / "host.txt"
+    host.write_text("server secret\n")
+    task = tmp_path / "t"
+    task.mkdir()
+    (task / "instruction.md").symlink_to(host)
+    (task / "task.toml").symlink_to(host)
+    row = ui_data.task_row(0, task)
+    assert "server secret" not in str(row)
+    assert ui_data._toml(task) == {}
+
+
+def test_a_link_in_a_task_counts_as_reading_the_host(monkeypatch, tmp_path):
+    from openenv.harbor import ui_data
+
+    host = tmp_path / "host"
+    host.mkdir()
+    (host / "compose.yaml").write_text("services: {}\n")
+    task = tmp_path / "t"
+    (task / "environment").mkdir(parents=True)
+    (task / "task.toml").write_text("")
+    monkeypatch.setattr(
+        "openenv.harbor.tasks.HarborTaskProvider.task_dir", lambda *a: task
+    )
+    assert not ui_data.reads_environment("org/x", 0)
+    (task / "environment" / "compose.yaml").symlink_to(host / "compose.yaml")
+    assert ui_data.reads_environment("org/x", 0), "a compose file that is a link"
+    (task / "environment" / "compose.yaml").unlink()
+    (task / "task.toml").unlink()
+    (task / "task.toml").symlink_to(host / "compose.yaml")
+    assert ui_data.reads_environment("org/x", 0), "a task.toml that is a link"

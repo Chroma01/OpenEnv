@@ -45,9 +45,27 @@ def _hub_not_found(exc: Exception) -> bool:
     return getattr(response, "status_code", None) == 404
 
 
+def _own(task_dir: Path, name: str) -> Path:
+    """`task_dir / name`, for a file the page reads by itself. A link is refused, since it can point
+    anywhere on this machine; callers already treat an `OSError` as a missing file."""
+    path = task_dir / name
+    if path.is_symlink():
+        raise OSError(f"{name} is a symbolic link")
+    return path
+
+
+def _first_link(root: Path) -> Path | None:
+    """The first symbolic link under `root`, file or folder, without following any."""
+    for folder, dirs, files in os.walk(root):
+        for name in dirs + files:
+            if os.path.islink(os.path.join(folder, name)):
+                return Path(folder, name)
+    return None
+
+
 def _toml(task_dir: Path) -> dict[str, Any]:
     try:
-        return tomllib.loads((task_dir / "task.toml").read_text(errors="replace"))
+        return tomllib.loads(_own(task_dir, "task.toml").read_text(errors="replace"))
     except (OSError, tomllib.TOMLDecodeError):
         return {}
 
@@ -55,7 +73,7 @@ def _toml(task_dir: Path) -> dict[str, Any]:
 def _first_line(task_dir: Path, limit: int = 160) -> str:
     """The first meaningful line of the instruction, used as a title when a task declares none."""
     try:
-        with (task_dir / "instruction.md").open(errors="replace") as fh:
+        with _own(task_dir, "instruction.md").open(errors="replace") as fh:
             for line in fh:
                 text = line.strip().lstrip("#").strip()
                 if text:
@@ -76,7 +94,7 @@ def _paragraphs(task_dir: Path, limit: int = 3, chars: int = 360) -> list[str]:
     Only the start of the file is read: a brief is two lines on a card.
     """
     try:
-        with (task_dir / "instruction.md").open(errors="replace") as fh:
+        with _own(task_dir, "instruction.md").open(errors="replace") as fh:
             head = fh.read(6000)
     except OSError:
         return []
@@ -406,7 +424,7 @@ def task_detail(spec: str, index: int) -> dict[str, Any]:
     task_dir = HarborTaskProvider([spec]).task_dir(spec, int(index))
     doc = _toml(task_dir)
     try:
-        instruction = (task_dir / "instruction.md").read_text(errors="replace")
+        instruction = _own(task_dir, "instruction.md").read_text(errors="replace")
     except OSError:
         instruction = ""
     shown, hidden = _metadata(doc)
@@ -448,6 +466,10 @@ def reads_environment(spec: str, index: int) -> bool:
     import yaml
 
     task_dir = HarborTaskProvider([spec]).task_dir(spec, int(index))
+    env_dir = task_dir / "environment"
+    # A link can put any file on this machine where the task reads its own.
+    if any(p.is_symlink() for p in (task_dir, task_dir / "task.toml", env_dir)):
+        return True
     toml_path = task_dir / "task.toml"
     if toml_path.is_file():
         try:
@@ -457,8 +479,9 @@ def reads_environment(spec: str, index: int) -> bool:
             return True
         if _HARBOR_VAR.search(text) or any("${" in s for s in _every_string(data)):
             return True
-    env_dir = task_dir / "environment"
     for path in sorted(env_dir.rglob("*")) if env_dir.is_dir() else []:
+        if path.is_symlink():
+            return True
         if path.suffix not in (".yml", ".yaml") or not path.is_file():
             continue
         try:
@@ -1069,6 +1092,26 @@ def start_add(spec: str, on_added: Any, settings: Any = None) -> dict[str, Any]:
                 job["state"] = "downloading"
                 resolve_task_dirs(spec, tqdm_class=_progress(job))
                 target = spec
+            # A link in a dataset from the Hub can point a task, or the files the page shows by
+            # itself, at anything on this machine. Refused, and removed so a restart, which lists
+            # the bucket's folders, does not bring it back.
+            from . import tasks as _tasks
+
+            root = (
+                Path(target)
+                if target.startswith("/")
+                else _tasks._DATASET_ROOT / target.replace("/", "__")
+            )
+            link = _first_link(root)
+            if link is not None:
+                try:
+                    remove_added(target, settings or _NO_BUCKET)
+                except Exception:  # noqa: BLE001 - the refusal matters more than the cleanup
+                    pass
+                raise ValueError(
+                    f"This dataset contains a symbolic link ({link.relative_to(root)}), which "
+                    "a dataset added from the page may not."
+                )
             job["state"] = "indexing"
             job["tasks"] = len(task_rows(target))
             job["target"] = target
@@ -1079,6 +1122,10 @@ def start_add(spec: str, on_added: Any, settings: Any = None) -> dict[str, Any]:
 
     threading.Thread(target=run, daemon=True, name=f"harbor-add-{spec}").start()
     return dict(job)
+
+
+# `remove_added`'s settings for a server with no bucket: the dataset is a local download
+_NO_BUCKET = type("NoBucket", (), {"bucket": None, "bucket_mount": None})()
 
 
 def add_status(spec: str) -> dict[str, Any] | None:
