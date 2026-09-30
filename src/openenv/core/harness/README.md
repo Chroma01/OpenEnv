@@ -151,7 +151,11 @@ For training, construct the session factory with the trainer's `sampling` policy
 Harbor and native OpenCode apply it before inference. The trainer need not compare
 sampling metadata after generation. Native OpenCode requires `transparent_proxy`
 mode and an engine returning prompt IDs and sampled-token logprobs; its standalone
-proxy normalizes `token_id:N` values into IDs and retains them across streaming.
+proxy retains choice token IDs across streaming, with `token_id:N` as a fallback.
+Training export uses the same token/logprob pairing check as Harbor when logprob
+entries identify their tokens. A disagreement on an agent turn rejects the training
+trace; raw capture stays available for inspection. Plain token text is not
+re-tokenized to infer an ID.
 
 Migration from TRL selection hooks: use `fetch_training_trace()` instead of a raw
 trace, move whole-turn exclusions into the producer's `loss_mask`, and keep final

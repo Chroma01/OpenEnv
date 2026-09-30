@@ -231,9 +231,18 @@ def test_native_session_exports_all_agent_roots_without_auxiliary_calls():
 
 
 @pytest.mark.parametrize("stream", [False, True])
-@pytest.mark.parametrize("choice_ids", [False, True])
+@pytest.mark.parametrize(
+    "choice_ids, token_text, reject_pairing",
+    [
+        (None, "token_id:20", False),
+        ([], "token_id:20", False),
+        ([20], "answer", False),
+        ([20], "token_id:20", False),
+        ([20], "token_id:21", True),
+    ],
+)
 def test_native_proxy_http_capture_reaches_training_contract(
-    monkeypatch, tmp_path, stream, choice_ids
+    monkeypatch, tmp_path, stream, choice_ids, token_text, reject_pairing
 ):
     from functools import partial
 
@@ -245,12 +254,8 @@ def test_native_proxy_http_capture_reaches_training_contract(
     from opencode_env.task import OpenCodeTask
 
     policy = training_sampling({"temperature": 0.7})
-    logprobs = {
-        "content": [
-            {"token": "answer" if choice_ids else "token_id:20", "logprob": -0.25}
-        ]
-    }
-    ids = {"token_ids": [20]} if choice_ids else {}
+    logprobs = {"content": [{"token": token_text, "logprob": -0.25}]}
+    ids = {"token_ids": choice_ids} if choice_ids is not None else {}
 
     def engine(request):
         body = json.loads(request.content)
@@ -269,12 +274,14 @@ def test_native_proxy_http_capture_reaches_training_contract(
                             "index": 0,
                             "delta": {"content": "answer"},
                             "logprobs": logprobs,
-                            **ids,
+                            **(ids if choice_ids else {}),
                         }
                     ],
                 },
                 {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
             ]
+            if choice_ids == []:
+                chunks[-1]["choices"][0]["token_ids"] = []
             content = (
                 "".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks)
                 + "data: [DONE]\n\n"
@@ -341,7 +348,15 @@ def test_native_proxy_http_capture_reaches_training_contract(
         verifier=None,
         proxy_trace_path=str(path),
     )
-    assert len(session.fetch_proxy_trace()) == 2
+    raw = session.fetch_proxy_trace()
+    assert len(raw) == 2
+    if reject_pairing:
+        with pytest.raises(
+            ValueError, match="missing or invalid engine tokens/logprobs"
+        ):
+            session.fetch_training_trace()
+        assert session.fetch_proxy_trace() == raw
+        return
     trace = session.fetch_training_trace()
     assert len(trace.turns) == 1
     assert trace.turns[0].prompt_token_ids == [10]
@@ -453,3 +468,46 @@ def test_choice_token_logprob_mismatch_is_not_truncated():
             per_token_logps=record.per_token_logps,
             loss_mask=[0, 1, 1],
         )
+
+
+def test_mispaired_auxiliary_call_does_not_invalidate_agent_capture():
+    from opencode_env.config import OpenCodeConfig
+    from opencode_env.harness import OpenCodeSession
+    from opencode_env.task import OpenCodeTask
+
+    records = [
+        {
+            "turn": i,
+            "prompt_token_ids": [10 + i],
+            "completion_token_ids": [20],
+            "per_token_logps": [-0.25],
+            "request": {"messages": [], "tools": tools},
+            "response": {
+                "choices": [
+                    {
+                        "token_ids": [20],
+                        "message": {"content": "answer"},
+                        "logprobs": {"content": [{"token": token, "logprob": -0.25}]},
+                    }
+                ]
+            },
+        }
+        for i, (tools, token) in enumerate(
+            [
+                (None, "token_id:21"),
+                ([{"type": "function"}], "token_id:20"),
+            ]
+        )
+    ]
+    session = OpenCodeSession(
+        sandbox=MagicMock(
+            read_text=lambda _: "\n".join(json.dumps(r) for r in records)
+        ),
+        config=OpenCodeConfig(base_url="http://unused"),
+        task=OpenCodeTask.coerce("task"),
+        proxy_trace_path="trace",
+    )
+    trace = session.fetch_training_trace()
+    assert [t.node_id for t in trace.turns] == ["1"]
+    assert trace.turns[0].per_token_logps == [-0.25]
+    assert session.fetch_proxy_trace() == records

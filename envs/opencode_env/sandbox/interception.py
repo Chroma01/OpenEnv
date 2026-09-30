@@ -484,7 +484,7 @@ def _build_turn_record(
     per_token_logps: list[float] = []
     for entry in content_lp:
         tokens.append(entry.get("token", ""))
-        if choice.get("token_ids") is None:
+        if not choice.get("token_ids"):
             token_id = entry.get("token_id")
             if token_id is None and str(entry.get("token", "")).startswith("token_id:"):
                 token_id = int(entry["token"].removeprefix("token_id:"))

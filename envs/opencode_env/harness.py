@@ -41,7 +41,7 @@ from openenv.core.harness import (
     TrainingTrace,
     VerifyResult,
 )
-from openenv.core.harness.capture.upstream import training_sampling
+from openenv.core.harness.capture.upstream import normalize_response, training_sampling
 
 from .config import OpenCodeConfig
 from .opencode_runtime import (
@@ -193,7 +193,7 @@ class OpenCodeSession(ResourceSession):
         graph = RolloutGraph()
         for entry in records:
             request = entry["request"]
-            response = entry["response"]
+            response = normalize_response(entry["response"])
             if (
                 response.get("upstream_status", 200) >= 400
                 or response.get("upstream_error")
@@ -211,7 +211,11 @@ class OpenCodeSession(ResourceSession):
                     node_id=str(entry["turn"]),
                     prompt_ids=entry["prompt_token_ids"],
                     sampled_ids=entry["completion_token_ids"],
-                    sampled_logprobs=entry["per_token_logps"],
+                    sampled_logprobs=(
+                        entry["per_token_logps"]
+                        if choice.get("logprobs", {}) is not None
+                        else None
+                    ),
                     request_messages=request.get("messages", []),
                     request_tools=request.get("tools"),
                     n_tools=len(request.get("tools") or []),
