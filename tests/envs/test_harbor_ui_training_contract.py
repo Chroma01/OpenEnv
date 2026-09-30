@@ -536,6 +536,14 @@ def test_env_reads_are_found_in_what_harbor_and_compose_decode(monkeypatch, tmp_
         "secrets:\n  t:\n    environment: HF_TOKEN\n",
         "services:\n  a:\n    build:\n      context: /\n",
         "services:\n  a:\n    devices:\n      - /dev/sda:/dev/sda\n",
+        # traversal in the middle of a path, once normalised, climbs out too
+        "services:\n  a:\n    volumes:\n      - type: bind\n        source: foo/../../etc\n        target: /x\n",
+        "services:\n  a:\n    volumes:\n      - ./a/../../x:/y\n",
+        "secrets:\n  t:\n    file: keys/../../../root/.env\n",
+        "services:\n  a:\n    build:\n      context: sub/../..\n",
+        # additional build contexts: the list form is `name=path`, the map form `name: path`
+        "services:\n  a:\n    build:\n      context: .\n      additional_contexts:\n        - src=/etc\n",
+        "services:\n  a:\n    build:\n      context: .\n      additional_contexts:\n        src: ../..\n",
         "services: [\n",  # unparseable
     ):
         compose.write_text(text)
@@ -545,7 +553,7 @@ def test_env_reads_are_found_in_what_harbor_and_compose_decode(monkeypatch, tmp_
         "services:\n  main:\n    build:\n      context: .\n      dockerfile: Dockerfile\n"
         '    working_dir: /app\n    command: ["sleep", "infinity"]\n'
         "    environment:\n      - PYTHONUNBUFFERED=1\n      - TZ=UTC\n"
-        "    volumes:\n      - ./data:/data\n      - /var/lib/cache\n"
+        "    volumes:\n      - ./data:/data\n      - ./a/../data:/b\n      - /var/lib/cache\n"
     )
     assert not ui_data.reads_environment("org/x", 0), "an ordinary compose file passes"
 

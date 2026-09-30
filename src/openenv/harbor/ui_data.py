@@ -12,6 +12,7 @@ Nothing here boots a sandbox or calls a model.
 from __future__ import annotations
 
 import os
+import posixpath
 import re
 import threading
 import tomllib
@@ -465,9 +466,18 @@ _COMPOSE_READS = (
 _MAX_COMPOSE_BYTES = (
     1_000_000  # compose files are small; a huge one is not worth parsing
 )
-_HOST_PATH = re.compile(r"^\s*(/|~|\.\.(/|\\|$))")
 # long-form mount `source`, secret/config `file`, build `context` and `dockerfile`
 _PATH_KEYS = {"source", "file", "context", "dockerfile"}
+
+
+def _outside(path: str) -> bool:
+    """Whether a path in a compose file points outside its own folder: absolute, under `~`, a
+    Windows drive, or climbing out once normalised (`foo/../../etc` is `../etc`)."""
+    p = path.strip().replace("\\", "/")
+    if p.startswith(("/", "~")) or re.match(r"^[A-Za-z]:", p):
+        return True
+    n = posixpath.normpath(p)
+    return n == ".." or n.startswith("../")
 
 
 def _strings(node: Any):
@@ -521,15 +531,17 @@ def _compose_reads(node: Any, seen: set[int]) -> bool:
             key == "volumes"
             and isinstance(value, list)
             and any(
-                isinstance(e, str) and ":" in e and _HOST_PATH.match(e.split(":", 1)[0])
+                isinstance(e, str) and ":" in e and _outside(e.split(":", 1)[0])
                 for e in value
             )
         ):
             return True
-        if key in _PATH_KEYS and isinstance(value, str) and _HOST_PATH.match(value):
+        if key in _PATH_KEYS and isinstance(value, str) and _outside(value):
             return True
+        # the map form is `name: path`, the list form `- name=path`
         if key == "additional_contexts" and any(
-            isinstance(v, str) and _HOST_PATH.match(v)
+            isinstance(v, str)
+            and _outside(v.split("=", 1)[-1] if isinstance(value, list) else v)
             for v in (value.values() if isinstance(value, dict) else value or [])
         ):
             return True
