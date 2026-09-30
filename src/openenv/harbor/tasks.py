@@ -198,7 +198,7 @@ def _materialise_hf_dataset(spec: str, *, tqdm_class: Any = None) -> Path:
         allow_patterns=["tasks/**"],
         local_dir=str(target),
         max_workers=_DOWNLOAD_WORKERS,
-        **({"tqdm_class": tqdm_class} if tqdm_class is not None else {}),
+        tqdm_class=tqdm_class,
     )
     return target
 

@@ -33,7 +33,16 @@ MAX_TREE_FILES = 2000
 MAX_FILE_BYTES = 256 * 1024
 
 _ROWS: dict[str, list[dict[str, Any]]] = {}
+_ROWS_GENERATION: dict[str, int] = {}
 _ROWS_LOCK = threading.Lock()
+
+
+def _hub_not_found(exc: Exception) -> bool:
+    """Whether a Hub exception specifically says the requested entry does not exist."""
+    if isinstance(exc, FileNotFoundError):
+        return True
+    response = getattr(exc, "response", None)
+    return getattr(response, "status_code", None) == 404
 
 
 def _toml(task_dir: Path) -> dict[str, Any]:
@@ -182,13 +191,17 @@ def task_rows(spec: str) -> list[dict[str, Any]]:
     with _ROWS_LOCK:
         if spec in _ROWS:
             return _ROWS[spec]
+        generation = _ROWS_GENERATION.get(spec, 0)
     dirs = resolve_task_dirs(spec)
     workers = int(os.environ.get("OPENENV_UI_INDEX_WORKERS", "16"))
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         rows = list(pool.map(lambda pair: task_row(*pair), enumerate(dirs)))
     _briefs(rows)
     with _ROWS_LOCK:
-        _ROWS[spec] = rows
+        # Removal invalidates both caches while indexing can still be reading files. Do not let that
+        # in-flight result resurrect rows for a dataset whose backing folder has been deleted.
+        if _ROWS_GENERATION.get(spec, 0) == generation:
+            _ROWS[spec] = rows
     return rows
 
 
@@ -742,13 +755,11 @@ def hub_summary(spec: str) -> dict[str, Any]:
                     if i > 50_000:
                         break
                 tasks = tasks or None
-    except Exception:  # noqa: BLE001 - no `tasks/` folder answers 404
-        pass
+    except Exception as exc:  # noqa: BLE001 - Hub exception types vary across supported clients
+        if not _hub_not_found(exc):
+            raise
     size = None
-    try:
-        size = getattr(api.dataset_info(spec), "used_storage", None)
-    except Exception:  # noqa: BLE001
-        pass
+    size = getattr(api.dataset_info(spec), "used_storage", None)
     return {"tasks": tasks, "bytes": size}
 
 
@@ -848,6 +859,7 @@ def _forget(spec: str) -> None:
         tasks._CACHE.pop(spec, None)
     with _ROWS_LOCK:
         _ROWS.pop(spec, None)
+        _ROWS_GENERATION[spec] = _ROWS_GENERATION.get(spec, 0) + 1
 
 
 def remove_added(spec: str, settings: Any) -> None:

@@ -30,6 +30,7 @@ import os
 import re
 import threading
 import time
+from collections import OrderedDict
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,7 @@ from .ui_icons import js_prelude
 
 # Hub datasets added from the page in this process, on top of the ones the server was started with.
 _ADDED: list[str] = []
+_ADDED_LOCK = threading.RLock()
 _HUB_ID = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
 
 
@@ -56,11 +58,15 @@ def _can_add_datasets() -> bool:
 
 
 def _allowed(spec: str, served: list[str]) -> bool:
-    return bool(spec) and (spec in served or spec in _ADDED)
+    with _ADDED_LOCK:
+        return bool(spec) and (spec in served or spec in _ADDED)
 
 
 _MAX_ADDED = 20
-_INSPECTED: dict[str, dict[str, Any]] = {}
+_MAX_INSPECTED = 128
+_INSPECT_TTL = 300
+_INSPECTED: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
+_INSPECTED_LOCK = threading.Lock()
 
 
 def _added_file(settings: ui_settings.UISettings) -> Path | None:
@@ -75,9 +81,11 @@ def _save_added(settings: ui_settings.UISettings) -> None:
     path = _added_file(settings)
     if path is None:
         return
+    with _ADDED_LOCK:
+        saved = sorted(set(_ADDED))
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(sorted(set(_ADDED)), indent=0))
+        path.write_text(json.dumps(saved, indent=0))
     except OSError:
         pass
 
@@ -90,18 +98,55 @@ def _load_added(settings: ui_settings.UISettings, served: list[str]) -> None:
         listed = json.loads(path.read_text())
     except (OSError, ValueError):
         return
-    for spec in listed if isinstance(listed, list) else []:
-        # Checked again without the network: the file is ours, but a path must never slip in.
-        spec = str(spec)
-        parts = spec.split("/")
-        if (
-            _HUB_ID.match(spec)
-            and not any(p in (".", "..") or p.startswith(".") for p in parts)
-            and spec not in served
-            and spec not in _ADDED
-            and len(_ADDED) < _MAX_ADDED
-        ):
-            _ADDED.append(spec)
+    with _ADDED_LOCK:
+        for spec in listed if isinstance(listed, list) else []:
+            # Checked again without the network: the file is ours, but a path must never slip in.
+            spec = str(spec)
+            parts = spec.split("/")
+            if (
+                _HUB_ID.match(spec)
+                and not any(p in (".", "..") or p.startswith(".") for p in parts)
+                and spec not in served
+                and spec not in _ADDED
+                and len(_ADDED) < _MAX_ADDED
+            ):
+                _ADDED.append(spec)
+
+
+def _inspect_hub(spec: str) -> dict[str, Any]:
+    """Inspect one Hub dataset, caching only successful answers for a bounded time."""
+    now = time.monotonic()
+    with _INSPECTED_LOCK:
+        cached = _INSPECTED.get(spec)
+        if cached is not None and now - cached[0] < _INSPECT_TTL:
+            _INSPECTED.move_to_end(spec)
+            return cached[1]
+        _INSPECTED.pop(spec, None)
+    summary = ui_data.hub_summary(spec)
+    with _INSPECTED_LOCK:
+        _INSPECTED[spec] = (now, summary)
+        _INSPECTED.move_to_end(spec)
+        while len(_INSPECTED) > _MAX_INSPECTED:
+            _INSPECTED.popitem(last=False)
+    return summary
+
+
+def _remove_added(
+    spec: str, served: list[str], settings: ui_settings.UISettings
+) -> dict[str, Any]:
+    """Serialise removal so two requests cannot delete or mutate the same dataset."""
+    with _ADDED_LOCK:
+        if spec in served or spec not in _ADDED:
+            return {"error": "Only datasets added from this page can be removed."}
+        try:
+            ui_data.remove_added(spec, settings)
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "error": f"Could not remove it: {type(exc).__name__}: {str(exc)[:200]}"
+            }
+        _ADDED.remove(spec)
+        _save_added(settings)
+        return {"ok": True, "spec": spec}
 
 
 def _hub_problem(spec: str) -> str | None:
@@ -188,7 +233,7 @@ def _capabilities(datasets: list[str], *, refresh: bool = False) -> Any:
                     "reachable": True,
                     "ok": service.capture_level == "tokens",
                 }
-                if service is not None and getattr(service, "llm_url", "")
+                if service is not None and service.llm_url
                 else {}
             )
             _CAPS["value"] = capabilities(datasets=datasets or None, llm=llm)
@@ -278,7 +323,7 @@ def _server_engine(
         }
     level = service.capture_level
     purpose = "train" if level == "tokens" else "eval"
-    provider = str(getattr(service, "provider", "") or "openai")
+    provider = str(service.provider or "openai")
     choices, profiles, hidden = _agent_choices(
         caps,
         purpose=purpose,
@@ -427,7 +472,7 @@ def validate_endpoint(
         if "behaviour_changed" in f or "tool_call" in f
     ]
     service = HarborService.current()
-    server_url = getattr(service, "llm_url", "") if service is not None else ""
+    server_url = service.llm_url if service is not None else ""
     if server_url and server_url.rstrip("/") != url:
         notes.append(
             "Rollouts from this page use this endpoint, not the server's default."
@@ -591,7 +636,7 @@ def _card(
     sources = (["server"] if server else []) + (
         ["hf", "url"] if settings.visitor_endpoints else []
     )
-    public = str(getattr(service, "public_url", "") or "")
+    public = str(service.public_url or "") if service is not None else ""
     host = urlparse(public).hostname or ""
     harnesses = {h.name: h for h in getattr(caps, "harnesses", []) or []}
     agents = []
@@ -708,9 +753,10 @@ def harbor_gradio_builder(
     if not settings.private_urls:
         ui_settings.guard_redirects()
     _load_added(settings, served)
-    for spec in ui_data.added_in_bucket(settings, served):
-        if spec not in _ADDED:
-            _ADDED.append(spec)
+    with _ADDED_LOCK:
+        for spec in ui_data.added_in_bucket(settings, served):
+            if spec not in _ADDED:
+                _ADDED.append(spec)
 
     def viewer(visitor: str | None) -> str | None:
         """Whose runs this visitor may see: everyone's (`None`), or their own."""
@@ -755,13 +801,15 @@ def harbor_gradio_builder(
         from .tasks import resolve_task_dirs
 
         out = []
-        for spec in served + [s for s in _ADDED if s not in served]:
+        with _ADDED_LOCK:
+            added = list(_ADDED)
+        for spec in served + [s for s in added if s not in served]:
             row: dict[str, Any] = {
                 "spec": spec,
                 "label": ui_data.hub_id(spec),
                 "added": spec not in served,
                 # Removing is adding's undo, so it takes the same permission.
-                "removable": spec in _ADDED
+                "removable": spec in added
                 and spec not in served
                 and _can_add_datasets(),
             }
@@ -797,12 +845,14 @@ def harbor_gradio_builder(
                 "error": "Adding datasets is turned off on this server.",
             }
         target = ui_data.added_spec(spec, settings)
-        if target in served or target in _ADDED or spec in served:
-            return {"spec": spec, "state": "done", "target": target}
+        with _ADDED_LOCK:
+            if target in served or target in _ADDED or spec in served:
+                return {"spec": spec, "state": "done", "target": target}
+            full = len(_ADDED) >= _MAX_ADDED
         problem = _hub_problem(spec)
         if problem:
             return {"spec": spec, "state": "error", "error": problem}
-        if len(_ADDED) >= _MAX_ADDED:
+        if full:
             return {
                 "spec": spec,
                 "state": "error",
@@ -818,17 +868,7 @@ def harbor_gradio_builder(
             return {
                 "error": "Adding and removing datasets is turned off on this server."
             }
-        if spec in served or spec not in _ADDED:
-            return {"error": "Only datasets added from this page can be removed."}
-        try:
-            ui_data.remove_added(spec, settings)
-        except Exception as exc:  # noqa: BLE001
-            return {
-                "error": f"Could not remove it: {type(exc).__name__}: {str(exc)[:200]}"
-            }
-        _ADDED.remove(spec)
-        _save_added(settings)
-        return {"ok": True, "spec": spec}
+        return _remove_added(spec, served, settings)
 
     def hb_add_status(spec: str) -> dict[str, Any]:
         return ui_data.add_status(str(spec or "")) or {"spec": spec, "state": "unknown"}
@@ -838,14 +878,21 @@ def harbor_gradio_builder(
         spec = str(spec or "").strip()
         if not _can_add_datasets() or not _HUB_ID.match(spec):
             return {"spec": spec, "tasks": None, "bytes": None}
-        if spec not in _INSPECTED:
-            _INSPECTED[spec] = ui_data.hub_summary(spec)
-        return {"spec": spec, **_INSPECTED[spec]}
+        try:
+            return {"spec": spec, **_inspect_hub(spec)}
+        except Exception as exc:  # noqa: BLE001 - distinguish Hub failure from an empty dataset
+            return {
+                "spec": spec,
+                "tasks": None,
+                "bytes": None,
+                "error": f"Could not inspect it: {type(exc).__name__}: {str(exc)[:200]}",
+            }
 
     def _remember_added(spec: str) -> None:
-        if spec not in _ADDED:
-            _ADDED.append(spec)
-        _save_added(settings)
+        with _ADDED_LOCK:
+            if spec not in _ADDED:
+                _ADDED.append(spec)
+            _save_added(settings)
 
     def hb_file(args: list[Any]) -> dict[str, Any]:
         spec, index, path = (list(args or []) + ["", 0, ""])[:3]
@@ -1164,19 +1211,18 @@ def harbor_gradio_builder(
         if sandbox not in caps.available_sandboxes:
             return say("That sandbox is not available on this server.")
         # Harbor fills `${VAR}` in a task's settings from this server's environment, where its keys
-        # are. The operator vouches for the datasets it serves; one added from the page is anyone's.
+        # are. Even a served task cannot receive them when a visitor controls the model: its trace is
+        # visible to that visitor, so the model can print a secret it finds in the sandbox.
         try:
-            reads_env = spec not in served and ui_data.reads_environment(
-                spec, int(selection.get("index", 0))
-            )
+            reads_env = ui_data.reads_environment(spec, int(selection.get("index", 0)))
         except Exception as exc:  # noqa: BLE001 - a task that cannot be read cannot be run
             return say(
                 f"Could not read this task: {type(exc).__name__}: {str(exc)[:200]}"
             )
         if reads_env:
             return say(
-                "This task reads environment variables or files from the server, which only "
-                "datasets the server was started with may do."
+                "This task reads environment variables or files from the server. The web UI cannot "
+                "run it without exposing those values to the model or trace."
             )
         service = HarborService.current()
         if service is None:

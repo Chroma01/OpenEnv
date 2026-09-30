@@ -97,6 +97,14 @@ _ADD_HELP = (
     "Let visitors add and remove Hub datasets from the UI. On a Space with a bucket they are copied "
     "into it; otherwise downloaded. Default: on only for a server on 127.0.0.1."
 )
+_UI_VARIABLES = (
+    "OPENENV_HARBOR_UI_SERVER_ENDPOINT",
+    "OPENENV_HARBOR_UI_VISITOR_ENDPOINTS",
+    "OPENENV_HARBOR_RUN_HISTORY",
+    "OPENENV_HARBOR_UI_ADD_DATASETS",
+    "OPENENV_HARBOR_UI_ROLLOUTS",
+    "OPENENV_HARBOR_RUN_VISIBILITY",
+)
 
 
 def _ui_env(
@@ -129,12 +137,38 @@ def _ui_env(
     return out
 
 
+def _remove_omitted_ui_variables(repo_id: str, supplied: dict[str, str]) -> None:
+    """Reset omitted UI flags to deployment defaults on an incremental Space push.
+
+    Space variables survive a push. Without this reconciliation, one old `--share-endpoint` remains
+    enabled forever even when later pushes omit it and the CLI says the Space default is not shared.
+    Only variables owned by this command are removed; unrelated operator configuration and every
+    secret are left alone.
+    """
+    from huggingface_hub import HfApi
+
+    api = HfApi()
+    existing = api.get_space_variables(repo_id)
+    for key in _UI_VARIABLES:
+        if key in existing and key not in supplied:
+            api.delete_space_variable(repo_id=repo_id, key=key)
+            print(f"variable  {key} reset to its Space default")
+
+
 def _split(values: Optional[list[str]]) -> list[str]:
     """Accept both `--dataset a --dataset b` and `--dataset a,b`."""
     out: list[str] = []
     for value in values or []:
         out.extend(v.strip() for v in value.split(",") if v.strip())
     return out
+
+
+def _hub_not_found(exc: Exception) -> bool:
+    """Whether a Hub operation failed specifically because its resource does not exist."""
+    if isinstance(exc, FileNotFoundError):
+        return True
+    response = getattr(exc, "response", None)
+    return getattr(response, "status_code", None) == 404
 
 
 @app.command("info")
@@ -652,6 +686,7 @@ def push(
             env_vars=[f"{k}={v}" for k, v in variables.items()],
             secrets=[f"{k}={v}" for k, v in secrets.items()],
         )
+        _remove_omitted_ui_variables(repo_id, ui_variables)
 
     # After the push, because volumes attach to a Space that already exists and `--recreate` has
     # just deleted it. Setting them triggers one more rebuild, which is why this is last.
@@ -852,14 +887,17 @@ def _fill_bucket(bucket: str, specs: list[str], public: bool | None = None) -> N
     from huggingface_hub import HfApi
 
     api = HfApi()
-    existing = None
-    with contextlib.suppress(Exception):
+    try:
         existing = api.bucket_info(bucket)
+    except Exception as exc:  # noqa: BLE001 - Hub exception classes vary across client versions
+        if not _hub_not_found(exc):
+            raise
+        existing = None
     if existing is None:
         api.create_bucket(bucket, private=not public, exist_ok=True)
         print(f"bucket    {bucket} created ({'public' if public else 'private'})")
     else:
-        private = bool(getattr(existing, "private", False))
+        private = bool(existing.private)
         if public is not None and private == public:
             api.update_bucket_settings(bucket, private=not public)
             print(f"bucket    {bucket} is now {'public' if public else 'private'}")

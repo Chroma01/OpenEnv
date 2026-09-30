@@ -350,7 +350,9 @@ def _attach_hf_login(app: Any) -> bool:
     # Gradio tells a Space from a laptop by `SYSTEM=spaces`, which Docker Spaces do not set. Without
     # it, `attach_oauth` installs its local stand-in, which signs every visitor in as the account of
     # the token the server holds (the operator's), with a token that calls nothing. `hf_login` is
-    # only true on a Space that has an OAuth app, so this is that Space.
+    # only true on a Space that has an OAuth app, so this is that Space. This stays process-wide:
+    # Gradio consults its Space detection after route attachment too, and restoring the old value
+    # would leave the OAuth callback and later Gradio behavior disagreeing about the deployment.
     os.environ.setdefault("SYSTEM", "spaces")
     try:
         from gradio.oauth import attach_oauth

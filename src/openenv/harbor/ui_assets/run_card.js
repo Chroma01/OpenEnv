@@ -151,6 +151,13 @@ function render() {
     // overwritten from Python, so an edit not yet connected survives a re-render.
     ui.stamp = v.stamp; ui.busy = ""; ui.quiet = false;
   }
+  if (!v.rollouts) {
+    element.innerHTML = `<div class="rc hb-panel">
+      <div class="hb-panel-h"><h3>${icon("file", 15)}Read-only server</h3></div>
+      <div class="hb-panel-b"><div class="hb-note"><span><b>This server is a read-only task browser.</b> You can inspect tasks and prior runs, but it does not accept model credentials or start agents and sandboxes.</span></div></div>
+    </div>`;
+    return;
+  }
   if (!ui.src || !sources.includes(ui.src)) ui.src = e.source && sources.includes(e.source) ? e.source : sources[0] || null;
   const agents = v.agents || [];
   if (!agents.some((a) => a.value === ui.agent)) ui.agent = v.agent || (agents[0] && agents[0].value) || null;
@@ -198,6 +205,7 @@ function render() {
         <button type="button" class="hb-btn primary lg block rc-run" ${ready ? "" : "disabled"}>${ui.busy === "run" ? '<span class="hb-spinner"></span>Starting…' : `${icon("play", 15)}${e.train && onEngine ? "Run training capture" : "Run rollout"}`}</button>
         ${why ? `<p class="hb-fine" style="text-align:center">${esc(why)}</p>` : ""}
         ${msg("go", v)}
+        <p class="hb-fine" style="text-align:center">Model usage follows the account shown above. Sandbox compute is billed to this server's operator, including Hugging Face Sandbox.</p>
         <p class="hb-fine" style="text-align:center">It keeps running if you close this page, and shows under Runs.</p>
       </div>
     </div>

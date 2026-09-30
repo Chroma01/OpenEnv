@@ -144,7 +144,7 @@ class LiveRun:
 
     def record(self) -> dict[str, Any]:
         return {
-            **{k: getattr(self, k) for k in _META if hasattr(self, k)},
+            **{k: getattr(self, k) for k in _META},
             "wall_s": (self.finished or time.time()) - self.created,
             "result": self.result,
         }
@@ -156,7 +156,7 @@ class RunManager:
     Args:
         store (`RunStore`, *optional*):
             Where finished rollouts go. Without one they stay in memory until the process exits.
-        max_live (`int`, *optional*, defaults to `$OPENENV_HARBOR_UI_MAX_RUNS` or `4`):
+        max_live (`int`, *optional*, defaults to `4`):
             Rollouts the UI may run at once. Each one holds a sandbox and spends the endpoint's credit,
             and on a public deployment anyone with the URL can press Run.
     """
@@ -211,7 +211,7 @@ class RunManager:
             task_title=title or task_dir.name,
             harness=harness,
             sandbox=sandbox,
-            model=str(engine.get("model") or getattr(service, "model", "") or ""),
+            model=str(engine.get("model") or service.model or ""),
             endpoint=str(engine.get("kind") or "custom endpoint")
             if custom
             else "server default",
@@ -245,7 +245,10 @@ class RunManager:
         def worker() -> None:
             import asyncio
 
-            outcome: dict[str, Any] = {}
+            outcome: dict[str, Any] = {
+                "status": "failed",
+                "error": "The rollout worker was interrupted.",
+            }
             try:
                 result = asyncio.run(
                     _rollout(
@@ -265,29 +268,31 @@ class RunManager:
                     "status": "done" if data.get("ok") else "failed",
                     "error": data.get("error"),
                 }
+            except asyncio.CancelledError as exc:
+                outcome = {"status": "failed", "error": f"{type(exc).__name__}: cancelled"}
             except Exception as exc:  # noqa: BLE001 - a failed rollout is a result, never a crash
                 outcome = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
             finally:
                 self._release_engine(engine, service)
-            with self._lock:
-                # All at once, under the lock that lists runs: a tick between "status done" and
-                # "no longer live" would draw a finished run as running and never redraw it.
-                run.result = outcome.get("result")
-                run.status, run.error = outcome["status"], outcome.get("error")
-                run.finished = time.time()
-                record = run.record()
-                self._done[run.id] = record
-                self._live.pop(run.id, None)
-                # Saved runs are read back from disk; without a store, memory is the only history,
-                # so a longer one is kept.
-                keep = _KEEP_DONE if self.store is not None else _KEEP_DONE * 4
-                for old in list(self._done)[:-keep]:
-                    del self._done[old]
-            if self.store is not None:
-                try:
-                    self.store.save(record)
-                except OSError:
-                    pass  # history is a convenience; the result is still in memory and on screen
+                with self._lock:
+                    # All at once, under the lock that lists runs: a tick between "status done" and
+                    # "no longer live" would draw a finished run as running and never redraw it.
+                    run.result = outcome.get("result")
+                    run.status, run.error = outcome["status"], outcome.get("error")
+                    run.finished = time.time()
+                    record = run.record()
+                    self._done[run.id] = record
+                    self._live.pop(run.id, None)
+                    # Saved runs are read back from disk; without a store, memory is the only history,
+                    # so a longer one is kept.
+                    keep = _KEEP_DONE if self.store is not None else _KEEP_DONE * 4
+                    for old in list(self._done)[:-keep]:
+                        del self._done[old]
+                if self.store is not None:
+                    try:
+                        self.store.save(record)
+                    except OSError:
+                        pass  # result remains in memory and on screen
 
         self._hold_engine(engine)
         threading.Thread(target=worker, daemon=True, name=f"harbor-ui-{run.id}").start()
@@ -316,7 +321,9 @@ class RunManager:
                 self._engines[key] = left
                 return
             self._engines.pop(key, None)
-        _forget_visitor_engine(upstream, service)
+            # Keep zero-count and eviction atomic with `_hold_engine`. Otherwise another rollout can
+            # acquire this key after the pop and have its freshly resolved client dropped here.
+            _forget_visitor_engine(upstream, service)
 
     def live(self, run_id: str, owner: str | None = None) -> LiveRun | None:
         with self._lock:
@@ -383,12 +390,7 @@ def _forget_visitor_engine(upstream: Any, service: Any) -> None:
     The pool keeps one client per engine and credential so concurrent rollouts share a probe. For a
     visitor's key that cache would otherwise outlive the page the key was typed into.
     """
-    state = getattr(
-        getattr(getattr(service, "capture", None), "app", None), "state", None
-    )
-    forget = getattr(getattr(state, "upstreams", None), "forget", None)
-    if forget is not None:
-        forget(upstream)
+    service.capture.app.state.upstreams.forget(upstream)
 
 
 async def _rollout(
@@ -421,7 +423,7 @@ async def _rollout(
         served = client.served_model or upstream.model
     else:
         upstream, (client, _) = None, pool.default
-        level = getattr(service, "capture_level", "text")
+        level = service.capture_level
         served = service.model
     return await _rollout_module.run_rollout(
         task_dir=task_dir,

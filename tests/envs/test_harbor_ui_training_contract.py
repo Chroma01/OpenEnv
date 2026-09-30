@@ -316,6 +316,17 @@ def test_settings_default_open_locally_and_closed_on_a_space(monkeypatch):
     assert ui_settings.load().run_visibility == "all"
 
 
+def test_an_empty_visitor_secret_is_replaced_and_persisted(tmp_path):
+    from types import SimpleNamespace
+
+    from openenv.harbor.ui_settings import visitor_secret
+
+    path = tmp_path / ".visitor-secret"
+    path.write_text(" \n")
+    value = visitor_secret(SimpleNamespace(runs_dir=tmp_path))
+    assert value and path.read_text() == value
+
+
 def test_a_visitor_url_may_not_reach_private_addresses():
     from openenv.harbor.ui_settings import url_problem
 
@@ -477,6 +488,40 @@ def test_tasks_that_read_the_server_environment_are_found(monkeypatch, tmp_path)
     (task / "environment" / "docker-compose.yaml").unlink()
     (task / "task.toml").write_text('[verifier.env]\nX = "${HF_TOKEN}"\n')
     assert ui_data.reads_environment("org/x", 0)
+
+
+def test_served_tasks_that_read_the_server_environment_cannot_run(
+    monkeypatch, tmp_path
+):
+    from types import SimpleNamespace
+
+    from openenv.harbor import ui, ui_runs
+
+    _clear_ui_env(monkeypatch)
+    monkeypatch.setenv("OPENENV_HARBOR_UI_SECRET", "test")
+    monkeypatch.setattr(
+        ui,
+        "_capabilities",
+        lambda *a, **k: SimpleNamespace(
+            available_sandboxes=["e2b"], sandboxes=[], harnesses=[]
+        ),
+    )
+    monkeypatch.setattr(ui, "_card", lambda *args, **kwargs: args[3])
+    monkeypatch.setattr(ui.ui_data, "reads_environment", lambda *args: True)
+    monkeypatch.setattr(
+        ui_runs.RunManager,
+        "start",
+        lambda *args, **kwargs: pytest.fail("unsafe task reached the rollout manager"),
+    )
+    app = ui.harbor_gradio_builder(datasets=["org/served"])
+    handlers = {getattr(b.fn, "__name__", ""): b.fn for b in app.fns.values()}
+    out = handlers["on_run"](
+        {"ok": True, "allowed_harnesses": ["opencode"], "purpose": "eval"},
+        {"spec": "org/served", "index": 0},
+        "visitor",
+        SimpleNamespace(_data={"agent": "opencode", "sandbox": "e2b"}),
+    )
+    assert "reads environment variables or files" in out[0]
 
 
 def test_a_compose_file_that_reads_the_host_is_found(monkeypatch, tmp_path):
@@ -678,7 +723,7 @@ def test_one_visitor_cannot_hold_every_slot(monkeypatch, tmp_path):
         "index": 0,
         "harness": "h",
         "sandbox": "e2b",
-        "service": SimpleNamespace(),
+        "service": SimpleNamespace(model=""),
     }
     try:
         manager.start(**kwargs, owner="a", per_owner=1)
@@ -691,6 +736,72 @@ def test_one_visitor_cannot_hold_every_slot(monkeypatch, tmp_path):
             manager.start(**kwargs, owner="d", per_owner=1, quota="hf:alice")
     finally:
         release.set()
+
+
+def test_a_cancelled_rollout_releases_its_live_slot(monkeypatch, tmp_path):
+    import asyncio
+    import time
+    from types import SimpleNamespace
+
+    from openenv.harbor import ui_runs
+
+    async def cancelled(*args, **kwargs):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(
+        "openenv.harbor.tasks.HarborTaskProvider.task_dir", lambda *a: tmp_path
+    )
+    monkeypatch.setattr(ui_runs, "_rollout", cancelled)
+    manager = ui_runs.RunManager(store=None, max_live=1)
+    run_id = manager.start(
+        engine={"server_default": True},
+        spec="s",
+        index=0,
+        harness="h",
+        sandbox="e2b",
+        service=SimpleNamespace(model="m"),
+    )
+    deadline = time.time() + 2
+    while manager.live(run_id) is not None and time.time() < deadline:
+        time.sleep(0.01)
+    assert manager.live(run_id) is None
+    assert manager.get(run_id)["status"] == "failed"
+    assert "CancelledError" in manager.get(run_id)["error"]
+
+
+def test_engine_reacquire_cannot_race_with_forget(monkeypatch):
+    import threading
+    from types import SimpleNamespace
+
+    from openenv.harbor import ui_runs
+
+    manager = ui_runs.RunManager()
+    engine = {
+        "url": "https://engine.example/v1",
+        "model": "m",
+        "api_key": "secret",
+    }
+    manager._hold_engine(engine)
+    started, reacquired = threading.Event(), threading.Event()
+    threads = []
+
+    def forget(upstream, service):
+        def hold_again():
+            started.set()
+            manager._hold_engine(engine)
+            reacquired.set()
+
+        thread = threading.Thread(target=hold_again)
+        threads.append(thread)
+        thread.start()
+        assert started.wait(1)
+        assert not reacquired.wait(0.05), "the refcount lock was released before forget"
+
+    monkeypatch.setattr(ui_runs, "_forget_visitor_engine", forget)
+    manager._release_engine(engine, SimpleNamespace())
+    threads[0].join(1)
+    assert reacquired.is_set()
+    assert list(manager._engines.values()) == [1]
 
 
 def test_markdown_from_a_model_loads_no_images():
@@ -768,6 +879,34 @@ def test_page_adds_go_into_the_bucket_and_the_bucket_is_the_list(monkeypatch, tm
     )
 
 
+def test_a_removed_dataset_cannot_be_recached_by_inflight_indexing(
+    monkeypatch, tmp_path
+):
+    import threading
+
+    from openenv.harbor import ui_data
+
+    task = tmp_path / "task"
+    task.mkdir()
+    started, release = threading.Event(), threading.Event()
+
+    def row(index, path):
+        started.set()
+        assert release.wait(1)
+        return {"index": index, "name": path.name, "title": path.name, "paragraphs": []}
+
+    monkeypatch.setattr(ui_data, "resolve_task_dirs", lambda spec: [task])
+    monkeypatch.setattr(ui_data, "task_row", row)
+    ui_data._forget("org/suite")
+    thread = threading.Thread(target=ui_data.task_rows, args=("org/suite",))
+    thread.start()
+    assert started.wait(1)
+    ui_data._forget("org/suite")
+    release.set()
+    thread.join(1)
+    assert "org/suite" not in ui_data._ROWS
+
+
 def test_removing_deletes_only_the_dataset_folder(monkeypatch, tmp_path):
     from types import SimpleNamespace
 
@@ -807,6 +946,38 @@ def test_removing_deletes_only_the_dataset_folder(monkeypatch, tmp_path):
     # `/` becomes `__`, so a spec can only name a folder inside the cache, and `..` names none.
     with pytest.raises(ValueError):
         ui_data.remove_added("..", local)
+
+
+def test_two_removes_of_the_same_dataset_are_serialised(monkeypatch):
+    import threading
+    from types import SimpleNamespace
+
+    from openenv.harbor import ui
+
+    ui._ADDED[:] = ["org/suite"]
+    entered, release = threading.Event(), threading.Event()
+
+    def remove(spec, settings):
+        entered.set()
+        assert release.wait(1)
+
+    monkeypatch.setattr(ui.ui_data, "remove_added", remove)
+    settings = SimpleNamespace(bucket=None, bucket_mount=None, runs_dir=None)
+    results = []
+    first = threading.Thread(
+        target=lambda: results.append(ui._remove_added("org/suite", [], settings))
+    )
+    second = threading.Thread(
+        target=lambda: results.append(ui._remove_added("org/suite", [], settings))
+    )
+    first.start()
+    assert entered.wait(1)
+    second.start()
+    release.set()
+    first.join(1)
+    second.join(1)
+    assert sum(bool(r.get("ok")) for r in results) == 1
+    assert sum("error" in r for r in results) == 1
 
 
 def test_signing_in_is_an_account_for_inference_providers(monkeypatch):
@@ -997,6 +1168,46 @@ def test_push_keeps_buckets_private_unless_told(monkeypatch, capsys):
     assert changed == [("org/open", True)]
 
 
+def test_push_does_not_treat_bucket_lookup_failures_as_missing(monkeypatch):
+    from openenv.cli.commands import harbor
+
+    class Api:
+        def bucket_info(self, bucket):
+            raise RuntimeError("rate limited")
+
+        def create_bucket(self, *args, **kwargs):
+            pytest.fail("a failed lookup is not proof that the bucket is missing")
+
+    monkeypatch.setattr("huggingface_hub.HfApi", Api)
+    with pytest.raises(RuntimeError, match="rate limited"):
+        harbor._fill_bucket("org/existing", [])
+
+
+def test_push_removes_omitted_ui_overrides(monkeypatch):
+    from types import SimpleNamespace
+
+    from openenv.cli.commands import harbor
+
+    deleted = []
+
+    class Api:
+        def get_space_variables(self, repo_id):
+            return {
+                "OPENENV_HARBOR_UI_SERVER_ENDPOINT": SimpleNamespace(value="1"),
+                "OPENENV_HARBOR_UI_ROLLOUTS": SimpleNamespace(value="0"),
+                "UNRELATED": SimpleNamespace(value="keep"),
+            }
+
+        def delete_space_variable(self, repo_id, key):
+            deleted.append(key)
+
+    monkeypatch.setattr("huggingface_hub.HfApi", Api)
+    harbor._remove_omitted_ui_variables(
+        "org/space", {"OPENENV_HARBOR_UI_ROLLOUTS": "1"}
+    )
+    assert deleted == ["OPENENV_HARBOR_UI_SERVER_ENDPOINT"]
+
+
 def test_push_refuses_a_space_whose_visitors_would_have_no_model():
     """On a Space the endpoint is shared only when asked, so turning visitors' own models off needs it."""
     import re
@@ -1065,3 +1276,46 @@ def test_sign_in_on_a_docker_space_is_the_real_one(monkeypatch):
     monkeypatch.setattr(FastAPI, "add_middleware", lambda self, *a, **k: None)
     assert serving._attach_hf_login(FastAPI())
     assert added == ["real"]
+
+
+def test_hub_inspection_failures_are_not_cached(monkeypatch):
+    from openenv.harbor import ui, ui_data
+
+    calls = 0
+
+    def summary(spec):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("rate limited")
+        return {"tasks": 3, "bytes": 10}
+
+    monkeypatch.setattr(ui_data, "hub_summary", summary)
+    ui._INSPECTED.clear()
+    with pytest.raises(RuntimeError, match="rate limited"):
+        ui._inspect_hub("org/suite")
+    assert ui._inspect_hub("org/suite") == {"tasks": 3, "bytes": 10}
+    assert calls == 2
+
+
+def test_hub_summary_propagates_rate_limits_and_timeouts(monkeypatch):
+    from openenv.harbor import ui_data
+
+    class Api:
+        def __init__(self, token=None):
+            pass
+
+        def list_repo_tree(self, *args, **kwargs):
+            raise RuntimeError("rate limited")
+
+    monkeypatch.setattr("huggingface_hub.HfApi", Api)
+    with pytest.raises(RuntimeError, match="rate limited"):
+        ui_data.hub_summary("org/suite")
+
+
+def test_read_only_ui_hides_rollout_controls():
+    from openenv.harbor.ui import _asset
+
+    source = _asset("run_card.js")
+    assert "This server is a read-only task browser." in source
+    assert "if (!v.rollouts)" in source

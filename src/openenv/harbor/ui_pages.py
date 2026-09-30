@@ -142,14 +142,16 @@ def header_html(
     settings = settings or ui_settings.load()
     service = HarborService.current()
     facts = []
-    if ui_settings.shared_endpoint(settings) is not None:
+    if not settings.rollouts:
+        facts.append(f"<span>{icon('file', 14)}read-only task browser</span>")
+    elif ui_settings.shared_endpoint(settings) is not None:
         train = service.capture_level == "tokens"
         facts.append(
             f"<span>{icon('cpu', 14)}<b>{_e(service.model)}</b>{'training capture' if train else 'eval only'}</span>"
         )
     elif settings.visitor_endpoints:
         facts.append(f"<span>{icon('key', 14)}bring your own model</span>")
-    if caps is not None:
+    if caps is not None and settings.rollouts:
         ok = len(caps.available_sandboxes)
         facts.append(
             f'<span><span class="hb-dot {"ok" if ok else "bad"}"></span><b>{ok}</b> of {len(caps.sandboxes)} sandboxes ready</span>'
@@ -826,14 +828,14 @@ def setup_html(
 
     settings = settings or ui_settings.load()
     service = HarborService.current()
-    if service is not None and getattr(service, "llm_url", ""):
-        proxy = str(getattr(service, "public_url", "") or "not started")
+    if service is not None and service.llm_url:
+        proxy = str(service.public_url or "not started")
         endpoint = (
             '<dl class="hb-kv">'
             f"<dt>Model</dt><dd>{_e(service.model)}</dd>"
             f"<dt>Endpoint</dt><dd>{_e(urlparse(service.llm_url).netloc or service.llm_url)}</dd>"
             f"<dt>Capture</dt><dd>{_e(LEVEL_TEXT.get(service.capture_level, service.capture_level))}</dd>"
-            f"<dt>Capture proxy</dt><dd><code>{_e(proxy)}</code>{' (mounted on this server)' if getattr(service, 'mounted', False) else ''}</dd>"
+            f"<dt>Capture proxy</dt><dd><code>{_e(proxy)}</code>{' (mounted on this server)' if service.mounted else ''}</dd>"
             f"<dt>Visitors may use it</dt><dd>{_on(settings.server_endpoint)}</dd>"
             "</dl>"
         )

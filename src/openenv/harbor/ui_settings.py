@@ -25,6 +25,7 @@ import secrets
 import socket
 import urllib.error
 import urllib.request
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -190,7 +191,7 @@ ROWS = (
         "Add Hub datasets from the page",
         "OPENENV_HARBOR_UI_ADD_DATASETS",
         "--add-datasets",
-        "Public Hub datasets only, downloaded to this server's disk. Their tasks may not read the server's environment variables. Default on only when the server listens on this machine alone.",
+        "Public Hub datasets only, copied into the configured Space bucket or otherwise downloaded to this server. Their tasks may not read the server's environment variables. Default on only when the server listens on this machine alone.",
     ),
     Row(
         "max_runs",
@@ -311,16 +312,24 @@ def visitor_secret(settings: UISettings) -> str:
         return secrets.token_urlsafe(32)
     path = settings.runs_dir / ".visitor-secret"
     try:
-        return path.read_text().strip()
+        saved = path.read_text().strip()
+        if saved:
+            return saved
     except OSError:
         pass
     value = secrets.token_urlsafe(32)
     try:
         settings.runs_dir.mkdir(parents=True, exist_ok=True)
-        path.write_text(value)
-        path.chmod(0o600)
-    except OSError:
-        pass
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(value)
+        temporary.chmod(0o600)
+        temporary.replace(path)
+    except OSError as exc:
+        warnings.warn(
+            f"Could not persist the Harbor visitor secret; run ownership will reset after restart: {exc}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
     return value
 
 
@@ -331,7 +340,7 @@ def shared_endpoint(settings: UISettings) -> object | None:
     service = HarborService.current()
     if (
         service is None
-        or not getattr(service, "llm_url", "")
+        or not service.llm_url
         or not settings.server_endpoint
     ):
         return None
