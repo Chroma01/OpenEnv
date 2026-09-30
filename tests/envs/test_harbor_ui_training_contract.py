@@ -506,6 +506,63 @@ def test_a_compose_file_that_reads_the_host_is_found(monkeypatch, tmp_path):
     assert not ui_data.reads_environment("org/x", 0), "the task's own files are fine"
 
 
+def test_env_reads_are_found_in_what_harbor_and_compose_decode(monkeypatch, tmp_path):
+    """The guard reads task.toml and compose files as parsed, not as raw text."""
+    import time
+
+    from openenv.harbor import ui_data
+
+    task = tmp_path / "t"
+    (task / "environment").mkdir(parents=True)
+    monkeypatch.setattr(
+        "openenv.harbor.tasks.HarborTaskProvider.task_dir", lambda *a: task
+    )
+    toml, compose = task / "task.toml", task / "environment" / "docker-compose.yaml"
+    toml.write_text("[verifier]\ntimeout_sec = 60\n")
+
+    # a TOML escape: no `${` on disk, `${HF_TOKEN}` once decoded, which Harbor expands
+    toml.write_text('[verifier.env]\nK = "\\u0024{HF_TOKEN}"\n')
+    assert ui_data.reads_environment("org/x", 0)
+    toml.write_text("[verifier\n")  # unparseable: not vouched for
+    assert ui_data.reads_environment("org/x", 0)
+    toml.write_text("[verifier]\ntimeout_sec = 60\n")
+
+    for text in (
+        "services:\n  a:\n    environment:\n      - HF_TOKEN\n",  # list form passes the host value
+        "services:\n  a:\n    environment:\n      HF_TOKEN:\n",  # map form, empty value
+        "services:\n  a:\n    build:\n      context: .\n      args:\n        - HF_TOKEN\n",
+        'services:\n  a:\n    command: "\\x24{HF_TOKEN}"\n',  # a YAML escape decodes to ${...}
+        "secrets:\n  t:\n    file: /root/.cache/huggingface/token\n",
+        "secrets:\n  t:\n    environment: HF_TOKEN\n",
+        "services:\n  a:\n    build:\n      context: /\n",
+        "services:\n  a:\n    devices:\n      - /dev/sda:/dev/sda\n",
+        "services: [\n",  # unparseable
+    ):
+        compose.write_text(text)
+        assert ui_data.reads_environment("org/x", 0), text
+
+    compose.write_text(
+        "services:\n  main:\n    build:\n      context: .\n      dockerfile: Dockerfile\n"
+        '    working_dir: /app\n    command: ["sleep", "infinity"]\n'
+        "    environment:\n      - PYTHONUNBUFFERED=1\n      - TZ=UTC\n"
+        "    volumes:\n      - ./data:/data\n      - /var/lib/cache\n"
+    )
+    assert not ui_data.reads_environment("org/x", 0), "an ordinary compose file passes"
+
+    # aliases share nodes: an alias bomb is tiny on disk and must not take exponential time
+    bomb = "a: &a [x, x, x, x, x, x, x, x, x, x]\n"
+    for n in range(1, 12):
+        bomb += (
+            f"{'b' * n}: &{'b' * n} ["
+            + ", ".join([f"*{'b' * (n - 1) or 'a'}"] * 10)
+            + "]\n"
+        )
+    compose.write_text(bomb)
+    started = time.monotonic()
+    assert not ui_data.reads_environment("org/x", 0)
+    assert time.monotonic() - started < 2
+
+
 def test_the_file_tree_lists_the_top_level_first_and_stops_at_the_cap(
     monkeypatch, tmp_path
 ):

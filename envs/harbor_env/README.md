@@ -337,8 +337,10 @@ What the UI guarantees whatever the settings:
 - Every dataset, task and file the page asks for is one the server serves or that was added from
   the page; a file path cannot leave its task directory.
 - A task from a dataset added from the page may not read the server's environment variables
-  (`${VAR}` in `task.toml` or a compose file), which is where the server's keys are, nor its files
-  (a compose `env_file`, `include`, `extends`, or a bind mount from outside the task).
+  (`${VAR}` in `task.toml` or a compose file, or a bare name under a compose `environment:`), which
+  is where the server's keys are, nor its files (a compose `env_file`, `include`, `extends`, or a
+  host path in a mount, secret, build context or device). Both files are checked as parsed, and one
+  that doesn't parse is refused.
 - A request that changes something in the UI (a rollout, an added dataset) is refused when a
   browser sends it from another site, so another page can't act through a visitor's browser. Behind
   a proxy that rewrites `Host`, list the public host in `OPENENV_HARBOR_UI_HOSTS` (comma-separated).

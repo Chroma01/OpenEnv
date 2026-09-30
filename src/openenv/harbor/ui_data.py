@@ -408,25 +408,45 @@ def reads_environment(spec: str, index: int) -> bool:
     """Whether a task would read this server's environment variables or files.
 
     Harbor resolves `${VAR}` in `task.toml` (`[verifier.env]`, `[environment.env]`) from the process
-    environment, and Docker Compose expands `$VAR` in a compose file the same way. Either one hands
-    the task this server's keys. A compose file can also reach past its own folder: `env_file`,
-    `include` and `extends` read other files, and a bind mount of an absolute or parent path puts
-    the host's files in the container, which a local container backend runs on this machine. Every
-    YAML file under `environment/` is checked, since one compose file can include another.
+    environment, and Docker Compose interpolates `$VAR` in a compose file the same way; an
+    `environment:` or build `args:` entry that is a bare name passes the host's value straight
+    through. Either one hands the task this server's keys. A compose file can also reach past its own
+    folder: `env_file`, `include` and `extends` read other files, and a host path in a bind mount, a
+    secret or config `file:`, a build `context` or a device puts the host's files in the container,
+    which a local container backend runs on this machine.
+
+    Both formats are checked as parsed, since that is what Harbor and Compose act on: an escape such
+    as `"\\u0024{HF_TOKEN}"` has no `${` on disk. A file that doesn't parse can't be vouched for and
+    counts as reading. The text patterns stay as a second net. Every YAML file under `environment/`
+    is checked, since one compose file can include another.
     """
+    import yaml
+
     task_dir = HarborTaskProvider([spec]).task_dir(spec, int(index))
-    checks = [(task_dir / "task.toml", (_HARBOR_VAR,))]
-    checks += [
-        (p, _COMPOSE_READS)
-        for p in (task_dir / "environment").rglob("*")
-        if p.suffix in (".yml", ".yaml") and p.is_file()
-    ]
-    for path, patterns in checks:
+    toml_path = task_dir / "task.toml"
+    if toml_path.is_file():
         try:
-            text = path.read_text(errors="replace")
-        except OSError:
+            text = toml_path.read_text()
+            data = tomllib.loads(text)
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            return True
+        if _HARBOR_VAR.search(text) or any("${" in s for s in _strings(data)):
+            return True
+    env_dir = task_dir / "environment"
+    for path in sorted(env_dir.rglob("*")) if env_dir.is_dir() else []:
+        if path.suffix not in (".yml", ".yaml") or not path.is_file():
             continue
-        if any(pattern.search(text) for pattern in patterns):
+        try:
+            if path.stat().st_size > _MAX_COMPOSE_BYTES:
+                return True
+            text = path.read_text()
+            docs = list(yaml.safe_load_all(text))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError):
+            return True
+        if any(p.search(text) for p in _COMPOSE_READS):
+            return True
+        seen: set[int] = set()
+        if any(_compose_reads(doc, seen) for doc in docs):
             return True
     return False
 
@@ -442,6 +462,80 @@ _COMPOSE_READS = (
     re.compile(r"^\s*-\s*[\"']?(/|~|\.\.)[^:\n]*:", re.M),
     re.compile(r"^\s*source\s*:\s*[\"']?(/|~|\.\.)", re.M),
 )
+_MAX_COMPOSE_BYTES = (
+    1_000_000  # compose files are small; a huge one is not worth parsing
+)
+_HOST_PATH = re.compile(r"^\s*(/|~|\.\.(/|\\|$))")
+# long-form mount `source`, secret/config `file`, build `context` and `dockerfile`
+_PATH_KEYS = {"source", "file", "context", "dockerfile"}
+
+
+def _strings(node: Any):
+    """Every string in a parsed document, keys included."""
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for key, value in node.items():
+            yield from _strings(key)
+            yield from _strings(value)
+    elif isinstance(node, (list, tuple)):
+        for value in node:
+            yield from _strings(value)
+
+
+def _passes_host_env(value: Any) -> bool:
+    """An `environment:` / `args:` entry that takes its value from the host.
+
+    A bare name in the list form (`- HF_TOKEN`) or an empty value in the map form (`HF_TOKEN:`)
+    copies the host's variable in; a secret's or config's `environment: NAME` is its value.
+    """
+    if isinstance(value, str):
+        return True
+    if isinstance(value, list):
+        return any(not isinstance(e, str) or "=" not in e for e in value)
+    if isinstance(value, dict):
+        return any(v is None for v in value.values())
+    return False
+
+
+def _compose_reads(node: Any, seen: set[int]) -> bool:
+    """Whether a parsed compose document reads the host's variables or files.
+
+    YAML aliases share nodes, so each container is walked once: an alias bomb that is tiny on disk
+    would otherwise take exponential time to walk.
+    """
+    if isinstance(node, str):
+        return "$" in node
+    if not isinstance(node, (dict, list)) or id(node) in seen:
+        return False
+    seen.add(id(node))
+    if isinstance(node, list):
+        return any(_compose_reads(value, seen) for value in node)
+    for key, value in node.items():
+        key = str(key)
+        if key in ("env_file", "include", "extends", "devices"):
+            return True
+        if key in ("environment", "args") and _passes_host_env(value):
+            return True
+        if (
+            key == "volumes"
+            and isinstance(value, list)
+            and any(
+                isinstance(e, str) and ":" in e and _HOST_PATH.match(e.split(":", 1)[0])
+                for e in value
+            )
+        ):
+            return True
+        if key in _PATH_KEYS and isinstance(value, str) and _HOST_PATH.match(value):
+            return True
+        if key == "additional_contexts" and any(
+            isinstance(v, str) and _HOST_PATH.match(v)
+            for v in (value.values() if isinstance(value, dict) else value or [])
+        ):
+            return True
+        if _compose_reads(key, seen) or _compose_reads(value, seen):
+            return True
+    return False
 
 
 def read_task_file(spec: str, index: int, path: str) -> dict[str, Any]:
