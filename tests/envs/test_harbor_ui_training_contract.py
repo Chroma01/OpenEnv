@@ -1319,3 +1319,15 @@ def test_read_only_ui_hides_rollout_controls():
     source = _asset("run_card.js")
     assert "This server is a read-only task browser." in source
     assert "if (!v.rollouts)" in source
+
+
+def test_a_task_row_lists_its_keywords_once(tmp_path):
+    """`task.toml` is read for keywords in `[task]` and `[metadata]`; a helper reused for the
+    environment check must not shadow the one this reads them with."""
+    from openenv.harbor import ui_data
+
+    (tmp_path / "task.toml").write_text(
+        '[task]\nname = "t"\nkeywords = ["sql", "data"]\n'
+        '[metadata]\nkeywords = ["data", "easy"]\n'
+    )
+    assert ui_data.task_row(0, tmp_path)["keywords"] == ["sql", "data", "easy"]

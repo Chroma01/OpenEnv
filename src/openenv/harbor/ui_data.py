@@ -452,7 +452,7 @@ def reads_environment(spec: str, index: int) -> bool:
             data = tomllib.loads(text)
         except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
             return True
-        if _HARBOR_VAR.search(text) or any("${" in s for s in _strings(data)):
+        if _HARBOR_VAR.search(text) or any("${" in s for s in _every_string(data)):
             return True
     env_dir = task_dir / "environment"
     for path in sorted(env_dir.rglob("*")) if env_dir.is_dir() else []:
@@ -501,17 +501,17 @@ def _outside(path: str) -> bool:
     return n == ".." or n.startswith("../")
 
 
-def _strings(node: Any):
+def _every_string(node: Any):
     """Every string in a parsed document, keys included."""
     if isinstance(node, str):
         yield node
     elif isinstance(node, dict):
         for key, value in node.items():
-            yield from _strings(key)
-            yield from _strings(value)
+            yield from _every_string(key)
+            yield from _every_string(value)
     elif isinstance(node, (list, tuple)):
         for value in node:
-            yield from _strings(value)
+            yield from _every_string(value)
 
 
 def _passes_host_env(value: Any) -> bool:
