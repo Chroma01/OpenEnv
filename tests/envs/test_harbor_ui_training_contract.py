@@ -1445,6 +1445,7 @@ def test_a_dataset_with_a_link_is_not_added(monkeypatch, tmp_path):
     """A link in a Hub dataset could point a task, or the files the page shows by itself, at
     anything on the server. The add is refused, and what was copied is removed."""
     import time
+    from types import SimpleNamespace
 
     from openenv.harbor import tasks, ui_data
 
@@ -1455,9 +1456,10 @@ def test_a_dataset_with_a_link_is_not_added(monkeypatch, tmp_path):
 
     def download(spec, tqdm_class=None):
         suite = tasks._DATASET_ROOT / spec.replace("/", "__") / "tasks"
-        (suite / "fine").mkdir(parents=True)
+        (suite / "fine").mkdir(parents=True, exist_ok=True)
         (suite / "fine" / "task.toml").write_text("")
-        (suite / "linked").symlink_to(secret)  # a flat task folder that is a link
+        if not (suite / "linked").is_symlink():
+            (suite / "linked").symlink_to(secret)  # a flat task folder that is a link
         return [suite / "fine", suite / "linked"]
 
     removed, added = [], []
@@ -1476,6 +1478,26 @@ def test_a_dataset_with_a_link_is_not_added(monkeypatch, tmp_path):
     assert job["state"] == "error" and "symbolic link" in job["error"], job
     assert removed == ["org/linked"] and added == []
 
+    # a cleanup that fails is said, and the copy it leaves is not listed after a restart
+    def fail(spec, settings):
+        raise OSError("bucket unreachable")
+
+    monkeypatch.setattr(ui_data, "remove_added", fail)
+    ui_data._JOBS.pop("org/linked", None)
+    ui_data.start_add("org/linked", on_added=added.append)
+    for _ in range(200):
+        job = ui_data.add_status("org/linked")
+        if job["state"] in ("error", "done"):
+            break
+        time.sleep(0.02)
+    assert "Removing the copy failed (OSError)" in job["error"] and added == []
+    mount = tmp_path / "data"
+    (mount / "org__plain" / "tasks" / "t").mkdir(parents=True)
+    (mount / "org__linked" / "tasks").mkdir(parents=True)
+    (mount / "org__linked" / "tasks" / "t").symlink_to(secret)
+    bucket = SimpleNamespace(bucket="org/space", bucket_mount=mount)
+    assert ui_data.added_in_bucket(bucket, served=[]) == [str(mount / "org__plain")]
+
 
 def test_the_page_reads_no_file_through_a_link(tmp_path):
     from openenv.harbor import ui_data
@@ -1489,6 +1511,13 @@ def test_the_page_reads_no_file_through_a_link(tmp_path):
     row = ui_data.task_row(0, task)
     assert "server secret" not in str(row)
     assert ui_data._toml(task) == {}
+    # nor through a task folder that is itself a link, with real files behind it
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "instruction.md").write_text("server secret\n")
+    (elsewhere / "task.toml").write_text('[task]\nname = "server secret"\n')
+    (tmp_path / "linked").symlink_to(elsewhere)
+    assert "server secret" not in str(ui_data.task_row(0, tmp_path / "linked"))
 
 
 def test_a_link_in_a_task_counts_as_reading_the_host(monkeypatch, tmp_path):

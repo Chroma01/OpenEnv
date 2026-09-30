@@ -46,21 +46,39 @@ def _hub_not_found(exc: Exception) -> bool:
 
 
 def _own(task_dir: Path, name: str) -> Path:
-    """`task_dir / name`, for a file the page reads by itself. A link is refused, since it can point
-    anywhere on this machine; callers already treat an `OSError` as a missing file."""
+    """`task_dir / name`, for a file the page reads by itself. A link is refused, the file or the
+    task folder it is read through, since it can point anywhere on this machine; callers already
+    treat an `OSError` as a missing file."""
     path = task_dir / name
-    if path.is_symlink():
-        raise OSError(f"{name} is a symbolic link")
+    if task_dir.is_symlink() or path.is_symlink():
+        raise OSError(f"{name} is read through a symbolic link")
     return path
 
 
 def _first_link(root: Path) -> Path | None:
-    """The first symbolic link under `root`, file or folder, without following any."""
-    for folder, dirs, files in os.walk(root):
-        for name in dirs + files:
-            if os.path.islink(os.path.join(folder, name)):
-                return Path(folder, name)
+    """A symbolic link under `root`, file or folder, without following any; `None` if there is none."""
+    folders = [root]
+    while folders:
+        with os.scandir(folders.pop()) as entries:
+            for entry in entries:
+                if entry.is_symlink():
+                    return Path(entry.path)
+                if entry.is_dir(follow_symlinks=False):
+                    folders.append(Path(entry.path))
     return None
+
+
+def _links_a_task(dataset: Path) -> bool:
+    """Whether `dataset/tasks`, or a task folder in it, is a link: what discovery would follow.
+
+    One directory listing, so it is cheap enough to ask of every added dataset at startup; links
+    further down are never followed by the page, the file viewer or `reads_environment`.
+    """
+    tasks = dataset / "tasks"
+    if tasks.is_symlink():
+        return True
+    with os.scandir(tasks) as entries:
+        return any(entry.is_symlink() for entry in entries)
 
 
 def _toml(task_dir: Path) -> dict[str, Any]:
@@ -941,7 +959,12 @@ def added_in_bucket(settings: Any, served: list[str]) -> list[str]:
             and not p.name.startswith(".")
             and (p / "tasks").is_dir()
         ):
-            if str(p) not in served and hub_id(str(p)) not in served:
+            # Task folders that are links stay out, e.g. a refused add a failed cleanup left behind.
+            if (
+                str(p) not in served
+                and hub_id(str(p)) not in served
+                and not _links_a_task(p)
+            ):
                 out.append(str(p))
     return out
 
@@ -1104,14 +1127,17 @@ def start_add(spec: str, on_added: Any, settings: Any = None) -> dict[str, Any]:
             )
             link = _first_link(root)
             if link is not None:
-                try:
-                    remove_added(target, settings or _NO_BUCKET)
-                except Exception:  # noqa: BLE001 - the refusal matters more than the cleanup
-                    pass
-                raise ValueError(
+                refusal = (
                     f"This dataset contains a symbolic link ({link.relative_to(root)}), which "
                     "a dataset added from the page may not."
                 )
+                try:
+                    remove_added(target, settings or _NO_BUCKET)
+                except Exception as exc:  # noqa: BLE001 - the refusal stands either way
+                    # What was copied stays. A restart skips it if its task folders are links
+                    # (`added_in_bucket`), and no link further down is ever followed.
+                    refusal += f" Removing the copy failed ({type(exc).__name__})."
+                raise ValueError(refusal)
             job["state"] = "indexing"
             job["tasks"] = len(task_rows(target))
             job["target"] = target
