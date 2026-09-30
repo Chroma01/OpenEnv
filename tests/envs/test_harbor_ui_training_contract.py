@@ -1633,7 +1633,8 @@ def test_the_task_api_reads_instructions_only_inside_the_dataset(tmp_path):
 def test_a_registry_task_is_read_only_inside_harbors_cache(monkeypatch, tmp_path):
     """A registry dataset is a git checkout in Harbor's cache, and git keeps links: the cache is its
     anchor, so a link out of it is not followed."""
-    import harbor.constants
+    # Harbor itself installs only on Python 3.12+ (the `harbor` extra); registry datasets need it.
+    constants = pytest.importorskip("harbor.constants")
     from openenv.harbor import tasks, ui_data
 
     cache = tmp_path / "cache"
@@ -1642,10 +1643,9 @@ def test_a_registry_task_is_read_only_inside_harbors_cache(monkeypatch, tmp_path
     (host / "t" / "instruction.md").write_text("REGSECRET\n")
     (cache / "tasks" / "id1" / "own").mkdir(parents=True)
     (cache / "tasks" / "id1" / "own" / "instruction.md").write_text("Do the task.\n")
-    (cache / "tasks" / "id2").symlink_to(
-        host
-    )  # a folder in the cache that is a link out of it
-    monkeypatch.setattr(harbor.constants, "CACHE_DIR", cache)
+    # a folder in the cache that is a link out of it
+    (cache / "tasks" / "id2").symlink_to(host)
+    monkeypatch.setattr(constants, "CACHE_DIR", cache)
     own, linked = cache / "tasks" / "id1" / "own", cache / "tasks" / "id2" / "t"
     assert tasks.task_root("reg@1.0", own) == own.resolve()
     assert tasks.task_root("reg@1.0", linked) is None
