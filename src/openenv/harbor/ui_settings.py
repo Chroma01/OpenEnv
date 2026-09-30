@@ -162,8 +162,8 @@ ROWS = (
         "private_urls",
         "Private and local URLs",
         "OPENENV_HARBOR_UI_PRIVATE_URLS",
-        "",
-        "Whether a visitor's URL may point at localhost or a private network. Default on only when the server listens on this machine alone (`--host 127.0.0.1`).",
+        "--private-urls",
+        "Whether a visitor's URL may point at localhost or a private network. Default on only when the server listens on this machine alone (`--host 127.0.0.1`). A `serve` flag only: on a Space those addresses are the Space's own network.",
     ),
     Row(
         "local_token",
@@ -226,7 +226,8 @@ ROWS = (
 
 _PRIVATE = (
     "This server does not call private or local addresses for visitors. Use a public URL, or run "
-    "the UI yourself to reach an endpoint on your own network."
+    "the UI yourself to reach an endpoint on your own network (`openenv harbor serve --host "
+    "127.0.0.1`, or `--private-urls`)."
 )
 # IPv6 forms that carry an IPv4 address inside, which `is_global` judges by the IPv6 range alone.
 _NAT64 = ipaddress.ip_network("64:ff9b::/96")

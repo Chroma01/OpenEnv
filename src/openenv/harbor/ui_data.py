@@ -766,8 +766,7 @@ def hub_summary(spec: str) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - Hub exception types vary across supported clients
         if not _hub_not_found(exc):
             raise
-    size = getattr(api.dataset_info(spec), "used_storage", None)
-    return {"tasks": tasks, "bytes": size}
+    return {"tasks": tasks, "bytes": api.dataset_info(spec).used_storage}
 
 
 def _tasks_bytes(spec: str, cap: int, max_files: int = 500_000) -> int | None:
@@ -777,6 +776,7 @@ def _tasks_bytes(spec: str, cap: int, max_files: int = 500_000) -> int | None:
     longer than `max_files` is not read to the end, and counts as unknown.
     """
     from huggingface_hub import HfApi
+    from huggingface_hub.hf_api import RepoFile
 
     total = 0
     try:
@@ -785,7 +785,8 @@ def _tasks_bytes(spec: str, cap: int, max_files: int = 500_000) -> int | None:
                 spec, repo_type="dataset", path_in_repo="tasks", recursive=True
             )
         ):
-            total += int(getattr(entry, "size", 0) or 0)
+            if isinstance(entry, RepoFile):
+                total += entry.size
             if total > cap:
                 return total
             if n >= max_files:
@@ -881,7 +882,7 @@ def remove_added(spec: str, settings: Any) -> None:
         folder = Path(spec).resolve()
         if folder.parent != settings.bucket_mount.resolve() or "__" not in folder.name:
             raise ValueError("not a dataset folder on the bucket")
-        from huggingface_hub import HfApi
+        from huggingface_hub import BucketFile, HfApi
 
         api = HfApi()
         paths = [
@@ -889,8 +890,7 @@ def remove_added(spec: str, settings: Any) -> None:
             for f in api.list_bucket_tree(
                 settings.bucket, prefix=f"{folder.name}/", recursive=True
             )
-            if getattr(f, "type", "file") != "directory"
-            and not type(f).__name__.endswith("Folder")
+            if isinstance(f, BucketFile)
         ]
         for i in range(0, len(paths), 1000):
             api.batch_bucket_files(settings.bucket, delete=paths[i : i + 1000])
@@ -984,8 +984,9 @@ def start_add(spec: str, on_added: Any, settings: Any = None) -> dict[str, Any]:
                 raise ValueError(
                     "This dataset has no tasks/<name>/ folder, which is how Harbor datasets are laid out."
                 )
-            if summary["bytes"] is None:
-                # the Hub has no size for some repositories; measure what the download would take
+            if not summary["bytes"]:
+                # The Hub has no size for some repositories, and reports 0 for one it has not
+                # measured yet (a fresh upload): measure what the download would take.
                 summary["bytes"] = _tasks_bytes(spec, _max_add_bytes())
             if summary["bytes"] is None:
                 raise ValueError(

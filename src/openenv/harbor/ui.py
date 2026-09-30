@@ -177,7 +177,7 @@ def _hub_problem(spec: str) -> str | None:
         info = HfApi(token=False).dataset_info(spec)
     except Exception:  # noqa: BLE001 - private, missing, or the Hub is down: all the same answer
         return f"{spec} is not a public dataset on the Hub."
-    if getattr(info, "private", False) or getattr(info, "gated", False):
+    if info.private or info.gated:
         return f"{spec} is private or gated. Only public datasets can be added from the page."
     return None
 
@@ -294,7 +294,7 @@ def _agent_choices(
     # Agents that passed a development run first, so the likely choices lead the list.
     ordered = sorted(
         (h for h in caps.harnesses if h.name not in unavailable),
-        key=lambda h: (getattr(h, "status", "") != "validated", h.name),
+        key=lambda h: (h.status != "validated", h.name),
     )
     choices, hidden = [], 0
     for h in ordered:
@@ -646,7 +646,7 @@ def _card(
     )
     public = str(service.public_url or "") if service is not None else ""
     host = urlparse(public).hostname or ""
-    harnesses = {h.name: h for h in getattr(caps, "harnesses", []) or []}
+    harnesses = {h.name: h for h in caps.harnesses}
     agents = []
     for label, name in engine.get("choices") or []:
         h = harnesses.get(name)
@@ -654,14 +654,14 @@ def _card(
             {
                 "value": name,
                 "label": label,
-                "host_side": bool(h is not None and getattr(h, "kind", "") == "base"),
+                "host_side": h is not None and h.kind == "base",
             }
         )
     values = [a["value"] for a in agents]
     hidden = engine.get("hidden_agents") or 0
     sandboxes = [
         {"name": s.name, "available": bool(s.available), "detail": s.detail}
-        for s in getattr(caps, "sandboxes", []) or []
+        for s in caps.sandboxes
     ]
     available = [s["name"] for s in sandboxes if s["available"]]
     empty = (
@@ -682,11 +682,7 @@ def _card(
         "local_token": settings.local_token and bool(_local_token()),
         "hf_login": {
             "on": settings.hf_login,
-            "user": (
-                getattr(profile, "username", None) or getattr(profile, "name", None)
-            )
-            if profile is not None
-            else None,
+            "user": (profile.username or profile.name) if profile is not None else None,
         },
         "private_urls": settings.private_urls,
         "engine": {
@@ -1227,10 +1223,15 @@ def harbor_gradio_builder(
             return say(
                 f"Could not read this task: {type(exc).__name__}: {str(exc)[:200]}"
             )
-        if reads_env and (spec not in served or not engine.get("server_default")):
+        if reads_env and spec not in served:
             return say(
-                "This task reads environment variables or files from the server. The web UI cannot "
-                "run it without exposing those values to the model or trace."
+                "This task reads environment variables or files from the server, which only "
+                "datasets the server was started with may do."
+            )
+        if reads_env and not engine.get("server_default"):
+            return say(
+                "This task passes the server's environment variables or files into the sandbox, so "
+                "it runs only on the server's own endpoint, never on a model you connect."
             )
         service = HarborService.current()
         if service is None:
@@ -1252,7 +1253,7 @@ def harbor_gradio_builder(
                 private_urls=settings.private_urls,
                 # a browser id is free to replace, so a signed-in visitor's cap follows the account
                 quota=f"hf:{profile.username}"
-                if getattr(profile, "username", None)
+                if profile is not None and profile.username
                 else "",
             )
         except (RuntimeError, IndexError, ValueError) as exc:

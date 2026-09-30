@@ -93,6 +93,11 @@ _ROLLOUTS_HELP = (
     "Let visitors start rollouts from the UI. --no-rollouts makes it a read-only task browser. "
     "Default: on."
 )
+_PRIVATE_URLS_HELP = (
+    "Let visitors connect an endpoint on a private or local address, such as http://localhost:8000/v1. "
+    "Default: allowed only when the server listens on 127.0.0.1, since --host 0.0.0.0 makes this "
+    "server call those addresses for anyone who can reach it."
+)
 _ADD_HELP = (
     "Let visitors add and remove Hub datasets from the UI. On a Space with a bucket they are copied "
     "into it; otherwise downloaded. Default: on only for a server on 127.0.0.1."
@@ -114,6 +119,7 @@ def _ui_env(
     run_history: Optional[bool],
     add_datasets: Optional[bool] = None,
     rollouts: Optional[bool] = None,
+    private_urls: Optional[bool] = None,
 ) -> dict[str, str]:
     """The UI's deployment settings as the variables `openenv.harbor.ui_settings` reads.
 
@@ -129,6 +135,8 @@ def _ui_env(
         ("OPENENV_HARBOR_RUN_HISTORY", run_history),
         ("OPENENV_HARBOR_UI_ADD_DATASETS", add_datasets),
         ("OPENENV_HARBOR_UI_ROLLOUTS", rollouts),
+        # `serve` only, so not one of `_UI_VARIABLES`: on a Space these addresses are its own network
+        ("OPENENV_HARBOR_UI_PRIVATE_URLS", private_urls),
     ):
         if value is not None:
             out[name] = "1" if value else "0"
@@ -372,6 +380,10 @@ def serve(
         Optional[bool],
         typer.Option("--rollouts/--no-rollouts", help=_ROLLOUTS_HELP),
     ] = None,
+    private_urls: Annotated[
+        Optional[bool],
+        typer.Option("--private-urls/--no-private-urls", help=_PRIVATE_URLS_HELP),
+    ] = None,
 ) -> None:
     """Serve Harbor tasks over the OpenEnv Task API and MCP.
 
@@ -389,6 +401,7 @@ def serve(
             run_history,
             add_datasets,
             rollouts,
+            private_urls,
         )
     )
     # The UI's laptop defaults (this machine's token, private URLs) are for a loopback-only server.

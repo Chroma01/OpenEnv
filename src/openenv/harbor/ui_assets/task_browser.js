@@ -231,6 +231,7 @@ function addRow(h) {
   const meta = [h.downloads != null ? `${fmt(h.downloads)} downloads` : "", h.rl_environment ? "rl-environment" : ""].filter(Boolean).join(" · ");
   const big = info && info.bytes > 1e9;
   const tasks = n === undefined ? '<span class="faint">…</span>'
+    : info.error ? `<span class="faint" title="${esc(info.error)}">couldn't check yet</span>`
     : n === null ? '<span class="faint">not in Harbor\'s tasks/ layout</span>'
     : `${fmt(n)} task${n === 1 ? "" : "s"}${info.bytes ? ` · <span class="${big ? "big" : ""}">${bytes(info.bytes)}</span>` : ""}`;
   let action;
@@ -248,7 +249,7 @@ function addRow(h) {
       : "Reading the tasks…";
     action = `<div class="prog"><span class="w"><span class="hb-spinner"></span>${esc(words)}</span><span class="bar"><i style="width:${pct.toFixed(1)}%"></i></span></div>`;
   } else {
-    action = `<button type="button" class="hb-btn sm primary" data-add="${esc(spec)}" ${n === null ? "disabled" : ""}>${icon("plus", 13)}Add</button>`;
+    action = `<button type="button" class="hb-btn sm primary" data-add="${esc(spec)}" ${n === null && !info.error ? "disabled" : ""}>${icon("plus", 13)}Add</button>`;
   }
   return `<div class="tb-add-row"><div class="nm"><b title="${esc(spec)}">${org ? `<span>${esc(org)}/</span>` : ""}${esc(name)}</b><em>${esc(meta)}</em></div>
     <span class="tk">${tasks}</span><div class="ac">${action}</div></div>`;
@@ -293,7 +294,7 @@ async function inspect() {
   const want = [...(st.add.hits || []).map((h) => h.id), ...(st.add.q.includes("/") ? [st.add.q.trim()] : [])];
   for (const spec of want.slice(0, 24)) {
     if (!st.add.open) return;
-    if (spec in st.add.counts) continue;
+    if (spec in st.add.counts && !st.add.counts[spec].error) continue;   // a Hub error is asked again
     try { st.add.counts[spec] = await server.hb_inspect(spec); } catch (_) { st.add.counts[spec] = { tasks: null, bytes: null }; }
     renderAdd();
   }

@@ -768,7 +768,7 @@ def _transcript_html(session: Any) -> str:
     nodes = sorted(session.graph.nodes(), key=lambda n: n.index)
     if not nodes:
         return ""
-    working = [n for n in nodes if getattr(n, "n_tools", 0)]
+    working = [n for n in nodes if n.n_tools]
     latest = (working or nodes)[-1]
     messages = list(latest.request_messages or [])
     if latest.response_message:

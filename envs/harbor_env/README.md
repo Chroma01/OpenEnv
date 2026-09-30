@@ -306,14 +306,14 @@ The same UI runs on a laptop and as a public Space, and what a visitor may do di
 depend on where the server runs: **local** is `serve --host 127.0.0.1`; **network** is any other bind
 address, including the default `0.0.0.0`, since everyone who can reach it is then a visitor; a
 **Space** is detected from `SPACE_ID`. Each setting is an environment variable (a Space variable on
-a Space), and some have a flag on `serve` and `push`.
+a Space), and some have a flag on `serve` and `push` (`--private-urls` is on `serve` only).
 
 | setting | variable | flag | local | network | Space |
 |---|---|---|---|---|---|
 | Visitors may start rollouts | `OPENENV_HARBOR_UI_ROLLOUTS` | `--rollouts` | on | on | on |
 | Visitors may use the server's endpoint | `OPENENV_HARBOR_UI_SERVER_ENDPOINT` | `--share-endpoint` | on | on | off |
 | Visitors may connect their own | `OPENENV_HARBOR_UI_VISITOR_ENDPOINTS` | `--visitor-endpoints` | on | on | on |
-| A visitor's URL may be private or local | `OPENENV_HARBOR_UI_PRIVATE_URLS` | | on | off | off |
+| A visitor's URL may be private or local | `OPENENV_HARBOR_UI_PRIVATE_URLS` | `--private-urls` | on | off | off |
 | Offer this machine's HF token | `OPENENV_HARBOR_UI_LOCAL_TOKEN` | | on | off | never |
 | Add and remove Hub datasets from the page | `OPENENV_HARBOR_UI_ADD_DATASETS` | `--add-datasets` | on | off | off |
 | Who sees runs (`all` or `own`) | `OPENENV_HARBOR_RUN_VISIBILITY` | `--run-visibility` | all | all | own |
@@ -338,12 +338,13 @@ What the UI guarantees whatever the settings:
   addresses, and is checked again before each rollout.
 - Every dataset, task and file the page asks for is one the server serves or that was added from
   the page; a file path cannot leave its task directory.
-- A task run from the web UI may not read the server's environment variables
-  (`${VAR}` in `task.toml` or a compose file, or a bare name under a compose `environment:`), which
-  is where the server's keys are, nor its files (a compose `env_file`, `include`, `extends`, or a
-  host path in a mount, secret, build context or device). This applies to startup datasets too,
-  because a visitor can control the model and read its trace. Both files are checked as parsed, and
-  one that doesn't parse is refused.
+- A task that reads the server's environment variables (`${VAR}` in `task.toml` or a compose file,
+  or a bare name under a compose `environment:`), which is where the server's keys are, or its files
+  (a compose `env_file`, `include`, `extends`, or a host path in a mount, secret, build context or
+  device) runs only on the server's own endpoint, never on a model a visitor connects: that model
+  does what the visitor asks, printing the sandbox's environment included, into a trace the visitor
+  reads. A dataset added from the page may not do either at all. Both files are checked as parsed,
+  and one that doesn't parse counts as reading.
 - A request that changes something in the UI (a rollout, an added dataset) is refused when a
   browser sends it from another site, so another page can't act through a visitor's browser. Behind
   a proxy that rewrites `Host`, list the public host in `OPENENV_HARBOR_UI_HOSTS` (comma-separated).
@@ -448,6 +449,7 @@ Start the env server: Task API for discovery, one long-running `run_rollout` MCP
 | `--run-history/--no-run-history` | flag | unset | Keep finished UI runs across restarts |
 | `--add-datasets/--no-add-datasets` | flag | unset | UI visitors may add and remove Hub datasets |
 | `--rollouts/--no-rollouts` | flag | unset | UI visitors may start rollouts |
+| `--private-urls/--no-private-urls` | flag | unset | UI visitors may connect an endpoint on a private or local address |
 
 An unset UI flag keeps the default for where the server runs.
 
@@ -491,8 +493,7 @@ send. Use it only to park a deployment.
 
 - `serve` binds `0.0.0.0` by default and therefore uses the network-safe UI defaults. Visitor
   endpoints such as `http://localhost:8000/v1` are refused. Bind the whole server to
-  `--host 127.0.0.1`, or deliberately set `OPENENV_HARBOR_UI_PRIVATE_URLS=1` when the server still
-  needs a remote trainer.
+  `--host 127.0.0.1`, or pass `--private-urls` when the server still needs a remote trainer.
 - An existing Space re-pushed with `--llm-url` no longer shares that endpoint with UI visitors
   unless `--share-endpoint` is passed. `--hf-login` also writes `hf_oauth: true` and the
   `inference-api` OAuth scope into the Space README.
@@ -683,8 +684,9 @@ is a separate conversation, and only agent conversations are counted as trainabl
 Harbor datasets are laid out, or it is over `OPENENV_HARBOR_UI_MAX_ADD_GB`.
 
 **A URL is refused as "private or local".** The server does not call private addresses for visitors
-unless `OPENENV_HARBOR_UI_PRIVATE_URLS` is on, which it is only for `--host 127.0.0.1`. To reach a
-vLLM on your own network, run the UI yourself.
+unless `OPENENV_HARBOR_UI_PRIVATE_URLS` is on, which by default it is only for `--host 127.0.0.1`;
+`serve --private-urls` turns it on for any bind address. To reach a vLLM on your own network from a
+Space, run the UI yourself.
 
 **Exit code 137.** The agent was killed inside the sandbox, almost always by the OOM killer on a
 large input. That is a task failure, not a capture failure.

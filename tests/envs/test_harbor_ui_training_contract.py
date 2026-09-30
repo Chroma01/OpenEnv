@@ -119,8 +119,15 @@ def test_ui_validation_keeps_the_qualified_acp_profile(tmp_path, monkeypatch):
             available_sandboxes=["e2b"],
             sandboxes=[],
             harnesses=[
-                SimpleNamespace(name="acp", dialect="openai"),
-                SimpleNamespace(name="opencode", dialect="openai"),
+                SimpleNamespace(
+                    name="acp", dialect="openai", status="validated", kind="installed"
+                ),
+                SimpleNamespace(
+                    name="opencode",
+                    dialect="openai",
+                    status="validated",
+                    kind="installed",
+                ),
             ],
         ),
     )
@@ -515,13 +522,25 @@ def test_served_tasks_that_read_the_server_environment_cannot_run(
     )
     app = ui.harbor_gradio_builder(datasets=["org/served"])
     handlers = {getattr(b.fn, "__name__", ""): b.fn for b in app.fns.values()}
-    out = handlers["on_run"](
-        {"ok": True, "allowed_harnesses": ["opencode"], "purpose": "eval"},
-        {"spec": "org/served", "index": 0},
-        "visitor",
-        SimpleNamespace(_data={"agent": "opencode", "sandbox": "e2b"}),
-    )
-    assert "reads environment variables or files" in out[0][1]
+    monkeypatch.setattr("openenv.harbor.serving.HarborService.current", lambda: None)
+
+    def said(**engine):
+        return handlers["on_run"](
+            {
+                "ok": True,
+                "allowed_harnesses": ["opencode"],
+                "purpose": "eval",
+                **engine,
+            },
+            {"spec": "org/served", "index": 0},
+            "visitor",
+            SimpleNamespace(_data={"agent": "opencode", "sandbox": "e2b"}),
+        )[0][1]
+
+    assert "runs only on the server's own endpoint" in said(server_default=False)
+    # The operator's own model is the operator's to point at its own keys: it goes on, and stops
+    # here only because this test runs no capture proxy.
+    assert "no capture proxy" in said(server_default=True)
 
 
 def test_a_compose_file_that_reads_the_host_is_found(monkeypatch, tmp_path):
@@ -650,8 +669,8 @@ def test_the_file_tree_lists_the_top_level_first_and_stops_at_the_cap(
 
 def test_a_dataset_of_unknown_size_is_measured_or_refused(monkeypatch):
     import time
-    from types import SimpleNamespace
 
+    from huggingface_hub.hf_api import RepoFile, RepoFolder
     from openenv.harbor import ui_data
 
     class Api:
@@ -661,24 +680,27 @@ def test_a_dataset_of_unknown_size_is_measured_or_refused(monkeypatch):
         def list_repo_tree(
             self, spec, repo_type=None, path_in_repo=None, recursive=None
         ):
-            return iter([SimpleNamespace(size=3_000_000_000)] * 3)
+            big = RepoFile(path="tasks/t/blob", size=3_000_000_000, oid="x")
+            return iter([RepoFolder(path="tasks/t", oid="y"), big, big, big])
 
     monkeypatch.setattr("huggingface_hub.HfApi", Api)
     assert ui_data._tasks_bytes("org/big", cap=5_000_000_000) == 6_000_000_000, (
         "stops once past the cap"
     )
-    monkeypatch.setattr(
-        ui_data, "hub_summary", lambda spec: {"tasks": 3, "bytes": None}
-    )
     monkeypatch.setattr(ui_data, "_tasks_bytes", lambda spec, cap: None)
-    ui_data._JOBS.pop("org/unsized", None)
-    ui_data.start_add("org/unsized", on_added=lambda target: None)
-    for _ in range(100):
-        job = ui_data.add_status("org/unsized")
-        if job["state"] == "error":
-            break
-        time.sleep(0.02)
-    assert job["state"] == "error" and "Couldn't tell how big" in job["error"]
+    # no size, or 0 from a repository the Hub has not measured yet: both are unknown
+    for spec, size in (("org/unsized", None), ("org/unmeasured", 0)):
+        monkeypatch.setattr(
+            ui_data, "hub_summary", lambda spec, size=size: {"tasks": 3, "bytes": size}
+        )
+        ui_data._JOBS.pop(spec, None)
+        ui_data.start_add(spec, on_added=lambda target: None)
+        for _ in range(100):
+            job = ui_data.add_status(spec)
+            if job["state"] == "error":
+                break
+            time.sleep(0.02)
+        assert job["state"] == "error" and "Couldn't tell how big" in job["error"], spec
 
 
 def test_harbor_expands_only_braced_variables_in_task_toml(monkeypatch):
@@ -910,6 +932,7 @@ def test_a_removed_dataset_cannot_be_recached_by_inflight_indexing(
 def test_removing_deletes_only_the_dataset_folder(monkeypatch, tmp_path):
     from types import SimpleNamespace
 
+    from huggingface_hub import BucketFile, BucketFolder
     from openenv.harbor import tasks, ui_data
 
     # on the bucket: every file under the dataset's folder, and nothing else
@@ -924,7 +947,11 @@ def test_removing_deletes_only_the_dataset_folder(monkeypatch, tmp_path):
 
         def list_bucket_tree(self, bucket, prefix=None, recursive=None):
             assert bucket == "org/space" and prefix == "org__suite/"
-            return [SimpleNamespace(path="org__suite/tasks/t1/task.toml", type="file")]
+            entry = {"path": "org__suite/tasks/t1/task.toml", "size": 1, "xetHash": ""}
+            return [
+                BucketFolder(type="directory", path="org__suite/tasks/t1"),
+                BucketFile(type="file", **entry),
+            ]
 
         def batch_bucket_files(self, bucket, delete=None):
             deleted.extend(delete)
@@ -1331,3 +1358,14 @@ def test_a_task_row_lists_its_keywords_once(tmp_path):
         '[metadata]\nkeywords = ["data", "easy"]\n'
     )
     assert ui_data.task_row(0, tmp_path)["keywords"] == ["sql", "data", "easy"]
+
+
+def test_serve_can_allow_private_urls_on_any_bind_address():
+    """`OPENENV_HARBOR_UI_PRIVATE_URLS` has a `serve` flag, and `push` never removes a hand-set one."""
+    from openenv.cli.commands import harbor
+
+    assert harbor._ui_env(None, None, "", None, private_urls=True) == {
+        "OPENENV_HARBOR_UI_PRIVATE_URLS": "1"
+    }
+    assert harbor._ui_env(None, None, "", None) == {}
+    assert "OPENENV_HARBOR_UI_PRIVATE_URLS" not in harbor._UI_VARIABLES
