@@ -280,7 +280,9 @@ removed again. Only datasets in Harbor's `tasks/<name>/` layout (flat or grouped
 - **Your endpoint**: any OpenAI-compatible URL (vLLM, SGLang, ...) or an Anthropic endpoint, probed
   before use. Training capture needs vLLM with `--return-tokens-as-token-ids`.
 
-A rollout runs on the server whether or not the page stays open.
+A rollout runs on the server whether or not the page stays open. Model usage is billed to the
+account or token selected on the card; sandbox compute is billed to the server operator, including
+Hugging Face Sandbox on a Space.
 
 **Runs.** Every run you may see, filterable by status. A run shows what the agent did as a timeline
 (its prompt, thinking, each tool call with its input and output, terminal sessions, the final
@@ -328,11 +330,12 @@ What the UI guarantees whatever the settings:
   addresses, and is checked again before each rollout.
 - Every dataset, task and file the page asks for is one the server serves or that was added from
   the page; a file path cannot leave its task directory.
-- A task from a dataset added from the page may not read the server's environment variables
+- A task run from the web UI may not read the server's environment variables
   (`${VAR}` in `task.toml` or a compose file, or a bare name under a compose `environment:`), which
   is where the server's keys are, nor its files (a compose `env_file`, `include`, `extends`, or a
-  host path in a mount, secret, build context or device). Both files are checked as parsed, and one
-  that doesn't parse is refused.
+  host path in a mount, secret, build context or device). This applies to startup datasets too,
+  because a visitor can control the model and read its trace. Both files are checked as parsed, and
+  one that doesn't parse is refused.
 - A request that changes something in the UI (a rollout, an added dataset) is refused when a
   browser sends it from another site, so another page can't act through a visitor's browser. Behind
   a proxy that rewrites `Host`, list the public host in `OPENENV_HARBOR_UI_HOSTS` (comma-separated).
@@ -464,7 +467,8 @@ Deploy the same server to a Hugging Face Space.
 `push` also takes the UI flags of `serve` (`--share-endpoint`, `--visitor-endpoints`,
 `--run-visibility`, `--run-history`, `--add-datasets`, `--rollouts`) and sets them as Space
 variables. Unlike `serve`, it doesn't share the endpoint with UI visitors unless `--share-endpoint` is
-given.
+given. Each push reconciles these UI variables: an omitted flag removes an earlier override and
+returns to the Space default, so a one-time `--share-endpoint` does not stay enabled forever.
 
 ```bash
 openenv harbor push --llm-url $LLM --dataset org/train,org/eval \
@@ -474,6 +478,19 @@ openenv harbor push --llm-url $LLM --dataset org/train,org/eval \
 `--private` is supported but rollouts will not work on a private Space: the capture proxy is served
 at `<space-url>/capture`, and a private Space requires an auth header the sandboxed agent does not
 send. Use it only to park a deployment.
+
+### Migration notes for the new UI
+
+- `serve` binds `0.0.0.0` by default and therefore uses the network-safe UI defaults. Visitor
+  endpoints such as `http://localhost:8000/v1` are refused. Bind the whole server to
+  `--host 127.0.0.1`, or deliberately set `OPENENV_HARBOR_UI_PRIVATE_URLS=1` when the server still
+  needs a remote trainer.
+- An existing Space re-pushed with `--llm-url` no longer shares that endpoint with UI visitors
+  unless `--share-endpoint` is passed. `--hf-login` also writes `hf_oauth: true` and the
+  `inference-api` OAuth scope into the Space README.
+- Capture `/health` still returns status and aggregate fields publicly, but its per-session
+  `upstreams` list is empty when an admin key is configured. Set
+  `OPENENV_CAPTURE_ADMIN_KEY` and send it as a bearer token to inspect that field.
 
 ## Supported harnesses
 

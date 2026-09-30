@@ -338,11 +338,7 @@ def shared_endpoint(settings: UISettings) -> object | None:
     from .serving import HarborService
 
     service = HarborService.current()
-    if (
-        service is None
-        or not service.llm_url
-        or not settings.server_endpoint
-    ):
+    if service is None or not service.llm_url or not settings.server_endpoint:
         return None
     return service
 

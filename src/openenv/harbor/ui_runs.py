@@ -269,7 +269,10 @@ class RunManager:
                     "error": data.get("error"),
                 }
             except asyncio.CancelledError as exc:
-                outcome = {"status": "failed", "error": f"{type(exc).__name__}: cancelled"}
+                outcome = {
+                    "status": "failed",
+                    "error": f"{type(exc).__name__}: cancelled",
+                }
             except Exception as exc:  # noqa: BLE001 - a failed rollout is a result, never a crash
                 outcome = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
             finally:

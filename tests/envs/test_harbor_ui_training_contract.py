@@ -521,7 +521,7 @@ def test_served_tasks_that_read_the_server_environment_cannot_run(
         "visitor",
         SimpleNamespace(_data={"agent": "opencode", "sandbox": "e2b"}),
     )
-    assert "reads environment variables or files" in out[0]
+    assert "reads environment variables or files" in out[0][1]
 
 
 def test_a_compose_file_that_reads_the_host_is_found(monkeypatch, tmp_path):

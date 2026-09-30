@@ -2719,7 +2719,7 @@ requires-dist = [
     { name = "gradio", specifier = ">=5" },
     { name = "harbor", extras = ["e2b", "modal", "daytona", "gke", "ec2", "runloop", "novita", "blaxel", "beam", "islo", "opensandbox", "cwsandbox", "use-computer", "cua"], specifier = ">=0.22.0" },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "huggingface-hub", specifier = ">=1.12" },
+    { name = "huggingface-hub", specifier = ">=1.29.0" },
     { name = "itsdangerous", specifier = ">=2.1" },
     { name = "openenv" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.24" },
