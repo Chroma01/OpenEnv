@@ -332,11 +332,13 @@ What the UI guarantees whatever the settings:
   the page; a file path cannot leave its task directory.
 - A task that reads the server's environment variables (`${VAR}` in `task.toml` or a compose file,
   or a bare name under a compose `environment:`), which is where the server's keys are, or its files
-  (a compose `env_file`, `include`, `extends`, or a host path in a mount, secret, build context or
-  device) runs only on the server's own endpoint, never on a model a visitor connects: that model
-  does what the visitor asks, printing the sandbox's environment included, into a trace the visitor
-  reads. A dataset added from the page may not do either at all. Both files are checked as parsed,
-  and one that doesn't parse counts as reading.
+  (a compose `env_file`, `include`, `extends`, or a host path in a mount, secret, build context,
+  cache, watch rule or device), or asks for more of the host than a folder (`privileged`,
+  `cap_add`, the host's namespaces, the Docker socket, another container's volumes, a named volume
+  or network with settings, the build's SSH agent) runs only on the server's own endpoint, never on
+  a model a visitor connects: that model does what the visitor asks, printing the sandbox's
+  environment included, into a trace the visitor reads. A dataset added from the page may not do
+  either at all. Both files are checked as parsed, and one that doesn't parse counts as reading.
 - A request that changes something in the UI (a rollout, an added dataset) is refused when a
   browser sends it from another site, so another page can't act through a visitor's browser. Behind
   a proxy that rewrites `Host`, list the public host in `OPENENV_HARBOR_UI_HOSTS` (comma-separated).
@@ -632,7 +634,9 @@ for anything else; `--no-hf-login` leaves it out.
 
 **Visitors bring their own model.** On a Space, a visitor runs on a model they connect: signing in
 with Hugging Face, a token, or their own endpoint. `--share-endpoint` lets them use the Space's own
-endpoint and key too, at your cost; the Task API and MCP use it either way.
+endpoint and key too, at your cost; the Task API and MCP use it either way. On that endpoint a
+served task that reads the Space's environment does run, and the visitor who starts it reads its
+trace, so don't combine `--share-endpoint` with such tasks on a public Space.
 
 **Rollouts on a Space use the Space's credentials for sandboxes.** An `hf-sandbox` rollout is billed
 to the `HF_TOKEN` the Space holds, whoever started it. `--no-rollouts` makes a public deployment a

@@ -434,8 +434,11 @@ def reads_environment(spec: str, index: int) -> bool:
     `environment:` or build `args:` entry that is a bare name passes the host's value straight
     through. Either one hands the task this server's keys. A compose file can also reach past its own
     folder: `env_file`, `include` and `extends` read other files, and a host path in a bind mount, a
-    secret or config `file:`, a build `context` or a device puts the host's files in the container,
-    which a local container backend runs on this machine.
+    secret or config `file:`, a build `context`, a build cache, a watch rule or a device puts the
+    host's files in the container, which a local container backend runs on this machine. So does
+    asking for more of the host than a folder: `privileged`, added capabilities, the host's
+    namespaces or Docker socket, another container's volumes, a named volume or network with
+    settings (the local driver binds any path), or the host's SSH agent during a build.
 
     Both formats are checked as parsed, since that is what Harbor and Compose act on: an escape such
     as `"\\u0024{HF_TOKEN}"` has no `${` on disk. A file that doesn't parse can't be vouched for and
@@ -487,8 +490,31 @@ _COMPOSE_READS = (
 _MAX_COMPOSE_BYTES = (
     1_000_000  # compose files are small; a huge one is not worth parsing
 )
-# long-form mount `source`, secret/config `file`, build `context` and `dockerfile`
-_PATH_KEYS = {"source", "file", "context", "dockerfile"}
+# long-form mount `source`, secret/config `file`, build `context` and `dockerfile`, `develop.watch` path
+_PATH_KEYS = {"source", "file", "context", "dockerfile", "path"}
+# Settings that hand a container more than its own folder, whatever their value: extra privileges
+# (enough to mount the host's disk on a local backend), other containers' volumes, the host's SSH
+# agent during a build, a file of labels read from the host. A task that needs one runs only on a
+# dataset the server was started with.
+_HOST_ACCESS = {
+    "privileged",
+    "cap_add",
+    "security_opt",
+    "device_cgroup_rules",
+    "volumes_from",
+    "ssh",
+    "label_file",
+    # the local volume driver binds any host path with `{type: none, o: bind, device: /etc}`
+    "driver_opts",
+    # the Docker API socket (the whole machine), a plugin binary run on the host, a build granted
+    # the host's network or insecure mode
+    "use_api_socket",
+    "provider",
+    "entitlements",
+}
+# Namespaces a container can share with the host or another container: `pid: host` alone shows it
+# every process's environment on the machine, this server's included.
+_NAMESPACES = {"pid", "ipc", "network_mode", "userns_mode", "uts", "cgroup", "network"}
 
 
 def _outside(path: str) -> bool:
@@ -547,6 +573,43 @@ def _compose_reads(node: Any, seen: set[int]) -> bool:
         if key in ("env_file", "include", "extends", "devices"):
             return True
         if key in ("environment", "args") and _passes_host_env(value):
+            return True
+        if key in _HOST_ACCESS and value not in (None, False, "", [], {}):
+            return True
+        if key == "external" and value:
+            return True
+        if (
+            key in _NAMESPACES
+            and isinstance(value, str)
+            and (
+                value.strip().lower() == "host"
+                or value.strip().startswith("container:")
+            )
+        ):
+            return True
+        # A named volume is a map at the top level (a service lists its mounts), and one with any
+        # setting can bind a host path or reuse a volume that already exists on the machine.
+        if key == "volumes" and isinstance(value, dict):
+            if any(
+                isinstance(c, dict) and set(map(str, c)) - {"labels"}
+                for c in value.values()
+            ):
+                return True
+        # A network named for one that exists (`host`, another project's), or on a driver that
+        # attaches to the host's interfaces (`macvlan`, `ipvlan`, `host`).
+        if key == "networks" and isinstance(value, dict):
+            for c in value.values():
+                if isinstance(c, dict) and (
+                    "name" in c
+                    or str(c.get("driver", "bridge")) not in ("bridge", "overlay")
+                ):
+                    return True
+        # a local build cache reads (`cache_from`) or writes (`cache_to`) a host folder
+        if key in ("cache_from", "cache_to") and any(
+            "type=local" in v.replace(" ", "")
+            for v in ([value] if isinstance(value, str) else value or [])
+            if isinstance(v, str)
+        ):
             return True
         if (
             key == "volumes"

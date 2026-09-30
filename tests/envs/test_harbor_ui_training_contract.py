@@ -563,9 +563,46 @@ def test_a_compose_file_that_reads_the_host_is_found(monkeypatch, tmp_path):
         "services:\n  a:\n    volumes:\n      - /:/host\n",
         "services:\n  a:\n    volumes:\n      - ~/.cache:/c\n",
         "services:\n  a:\n    volumes:\n      - type: bind\n        source: ../..\n        target: /x\n",
+        # a named volume on the local driver binds any host path
+        "volumes:\n  h:\n    driver: local\n    driver_opts:\n      type: none\n      o: bind\n      device: /etc\n",
+        "volumes:\n  h:\n    external: true\n",
+        "volumes:\n  h:\n    name: another_projects_data\n",
+        "networks:\n  n:\n    name: host\n",
+        "networks:\n  n:\n    driver: macvlan\n",
+        # more of the host than a folder: privileges, host namespaces, the Docker socket
+        "services:\n  a:\n    privileged: true\n",
+        "services:\n  a:\n    cap_add: [SYS_ADMIN]\n",
+        "services:\n  a:\n    security_opt: [apparmor:unconfined]\n",
+        "services:\n  a:\n    pid: host\n",
+        "services:\n  a:\n    network_mode: host\n",
+        "services:\n  a:\n    ipc: container:other\n",
+        "services:\n  a:\n    volumes_from: [container:other]\n",
+        "services:\n  a:\n    use_api_socket: true\n",
+        "services:\n  a:\n    provider:\n      type: plugin\n",
+        # a build that reads the host: its SSH agent, its network, a local cache folder
+        "services:\n  a:\n    build:\n      context: .\n      ssh: [default]\n",
+        "services:\n  a:\n    build:\n      context: .\n      network: host\n",
+        "services:\n  a:\n    build:\n      context: .\n      entitlements: [network.host]\n",
+        "services:\n  a:\n    build:\n      context: .\n      cache_from: [type=local,src=/etc]\n",
+        "services:\n  a:\n    develop:\n      watch:\n        - path: /etc\n          action: sync\n          target: /x\n",
     ):
         included.write_text(text)
         assert ui_data.reads_environment("org/x", 0), text
+    # what ordinary task environments use stays allowed
+    included.write_text(
+        "services:\n"
+        "  main:\n"
+        "    build:\n      context: .\n      cache_from: [type=registry,ref=org/cache]\n"
+        "    privileged: false\n"
+        "    network_mode: bridge\n"
+        "    environment:\n      MODE: test\n"
+        "    volumes:\n      - data:/data\n      - ./fixtures:/fixtures:ro\n"
+        "    networks:\n      back:\n        aliases: [db]\n"
+        "    develop:\n      watch:\n        - path: ./src\n          action: sync\n          target: /app\n"
+        "volumes:\n  data:\n  cache:\n    labels:\n      a: b\n"
+        "networks:\n  back:\n    driver: bridge\n    internal: true\n"
+    )
+    assert not ui_data.reads_environment("org/x", 0), "an ordinary compose file passes"
     included.write_text("services:\n  a:\n    volumes:\n      - ./data:/data\n")
     assert not ui_data.reads_environment("org/x", 0), "the task's own files are fine"
 
