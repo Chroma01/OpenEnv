@@ -276,26 +276,28 @@ class RunManager:
             except Exception as exc:  # noqa: BLE001 - a failed rollout is a result, never a crash
                 outcome = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
             finally:
-                self._release_engine(engine, service)
-                with self._lock:
-                    # All at once, under the lock that lists runs: a tick between "status done" and
-                    # "no longer live" would draw a finished run as running and never redraw it.
-                    run.result = outcome.get("result")
-                    run.status, run.error = outcome["status"], outcome.get("error")
-                    run.finished = time.time()
-                    record = run.record()
-                    self._done[run.id] = record
-                    self._live.pop(run.id, None)
-                    # Saved runs are read back from disk; without a store, memory is the only history,
-                    # so a longer one is kept.
-                    keep = _KEEP_DONE if self.store is not None else _KEEP_DONE * 4
-                    for old in list(self._done)[:-keep]:
-                        del self._done[old]
-                if self.store is not None:
-                    try:
-                        self.store.save(record)
-                    except OSError:
-                        pass  # result remains in memory and on screen
+                try:
+                    self._release_engine(engine, service)
+                finally:
+                    with self._lock:
+                        # All at once, under the lock that lists runs: a tick between "status done"
+                        # and "no longer live" would draw a finished run as running forever.
+                        run.result = outcome.get("result")
+                        run.status, run.error = outcome["status"], outcome.get("error")
+                        run.finished = time.time()
+                        record = run.record()
+                        self._done[run.id] = record
+                        self._live.pop(run.id, None)
+                        # Saved runs are read back from disk; without a store, memory is the only
+                        # history, so a longer one is kept.
+                        keep = _KEEP_DONE if self.store is not None else _KEEP_DONE * 4
+                        for old in list(self._done)[:-keep]:
+                            del self._done[old]
+                    if self.store is not None:
+                        try:
+                            self.store.save(record)
+                        except OSError:
+                            pass  # result remains in memory and on screen
 
         self._hold_engine(engine)
         threading.Thread(target=worker, daemon=True, name=f"harbor-ui-{run.id}").start()

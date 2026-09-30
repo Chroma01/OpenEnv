@@ -44,6 +44,7 @@ from .ui_icons import js_prelude
 # Hub datasets added from the page in this process, on top of the ones the server was started with.
 _ADDED: list[str] = []
 _ADDED_LOCK = threading.RLock()
+_REMOVING: set[str] = set()
 _HUB_ID = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
 
 
@@ -124,7 +125,7 @@ def _inspect_hub(spec: str) -> dict[str, Any]:
         _INSPECTED.pop(spec, None)
     summary = ui_data.hub_summary(spec)
     with _INSPECTED_LOCK:
-        _INSPECTED[spec] = (now, summary)
+        _INSPECTED[spec] = (time.monotonic(), summary)
         _INSPECTED.move_to_end(spec)
         while len(_INSPECTED) > _MAX_INSPECTED:
             _INSPECTED.popitem(last=False)
@@ -136,15 +137,22 @@ def _remove_added(
 ) -> dict[str, Any]:
     """Serialise removal so two requests cannot delete or mutate the same dataset."""
     with _ADDED_LOCK:
-        if spec in served or spec not in _ADDED:
+        if spec in served or spec not in _ADDED or spec in _REMOVING:
             return {"error": "Only datasets added from this page can be removed."}
+        _REMOVING.add(spec)
+    try:
+        ui_data.remove_added(spec, settings)
+    except Exception as exc:  # noqa: BLE001
         try:
-            ui_data.remove_added(spec, settings)
-        except Exception as exc:  # noqa: BLE001
             return {
                 "error": f"Could not remove it: {type(exc).__name__}: {str(exc)[:200]}"
             }
+        finally:
+            with _ADDED_LOCK:
+                _REMOVING.discard(spec)
+    with _ADDED_LOCK:
         _ADDED.remove(spec)
+        _REMOVING.discard(spec)
         _save_added(settings)
         return {"ok": True, "spec": spec}
 
@@ -1219,7 +1227,7 @@ def harbor_gradio_builder(
             return say(
                 f"Could not read this task: {type(exc).__name__}: {str(exc)[:200]}"
             )
-        if reads_env:
+        if reads_env and (spec not in served or not engine.get("server_default")):
             return say(
                 "This task reads environment variables or files from the server. The web UI cannot "
                 "run it without exposing those values to the model or trace."

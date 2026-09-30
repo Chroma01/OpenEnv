@@ -33,7 +33,7 @@ MAX_TREE_FILES = 2000
 MAX_FILE_BYTES = 256 * 1024
 
 _ROWS: dict[str, list[dict[str, Any]]] = {}
-_ROWS_GENERATION: dict[str, int] = {}
+_ROWS_INFLIGHT: dict[str, object] = {}
 _ROWS_LOCK = threading.Lock()
 
 
@@ -191,17 +191,25 @@ def task_rows(spec: str) -> list[dict[str, Any]]:
     with _ROWS_LOCK:
         if spec in _ROWS:
             return _ROWS[spec]
-        generation = _ROWS_GENERATION.get(spec, 0)
-    dirs = resolve_task_dirs(spec)
-    workers = int(os.environ.get("OPENENV_UI_INDEX_WORKERS", "16"))
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        rows = list(pool.map(lambda pair: task_row(*pair), enumerate(dirs)))
-    _briefs(rows)
+        token = object()
+        _ROWS_INFLIGHT[spec] = token
+    try:
+        dirs = resolve_task_dirs(spec)
+        workers = int(os.environ.get("OPENENV_UI_INDEX_WORKERS", "16"))
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            rows = list(pool.map(lambda pair: task_row(*pair), enumerate(dirs)))
+        _briefs(rows)
+    except BaseException:
+        with _ROWS_LOCK:
+            if _ROWS_INFLIGHT.get(spec) is token:
+                _ROWS_INFLIGHT.pop(spec, None)
+        raise
     with _ROWS_LOCK:
         # Removal invalidates both caches while indexing can still be reading files. Do not let that
         # in-flight result resurrect rows for a dataset whose backing folder has been deleted.
-        if _ROWS_GENERATION.get(spec, 0) == generation:
+        if _ROWS_INFLIGHT.get(spec) is token:
             _ROWS[spec] = rows
+            _ROWS_INFLIGHT.pop(spec, None)
     return rows
 
 
@@ -859,7 +867,7 @@ def _forget(spec: str) -> None:
         tasks._CACHE.pop(spec, None)
     with _ROWS_LOCK:
         _ROWS.pop(spec, None)
-        _ROWS_GENERATION[spec] = _ROWS_GENERATION.get(spec, 0) + 1
+        _ROWS_INFLIGHT.pop(spec, None)
 
 
 def remove_added(spec: str, settings: Any) -> None:

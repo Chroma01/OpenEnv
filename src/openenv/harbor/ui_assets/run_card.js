@@ -205,7 +205,7 @@ function render() {
         <button type="button" class="hb-btn primary lg block rc-run" ${ready ? "" : "disabled"}>${ui.busy === "run" ? '<span class="hb-spinner"></span>Starting…' : `${icon("play", 15)}${e.train && onEngine ? "Run training capture" : "Run rollout"}`}</button>
         ${why ? `<p class="hb-fine" style="text-align:center">${esc(why)}</p>` : ""}
         ${msg("go", v)}
-        <p class="hb-fine" style="text-align:center">Model usage follows the account shown above. Sandbox compute is billed to this server's operator, including Hugging Face Sandbox.</p>
+        <p class="hb-fine" style="text-align:center">Model usage is billed to the endpoint or account selected above. Sandbox compute is billed to this server's operator, including Hugging Face Sandbox.</p>
         <p class="hb-fine" style="text-align:center">It keeps running if you close this page, and shows under Runs.</p>
       </div>
     </div>
