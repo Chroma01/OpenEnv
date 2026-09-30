@@ -46,11 +46,12 @@ async function loadModels() {
 function pickerRows() {
   const q = ui.pkQ.trim().toLowerCase();
   const list = (ui.models || []).filter((m) => (!ui.toolsOnly || m.tools)
-    && (!q || m.id.toLowerCase().includes(q) || m.providers.some((p) => p.name.includes(q))));
+    && (!q || m.id.toLowerCase().includes(q) || (m.providers || []).some((p) => String(p.name || "").toLowerCase().includes(q))));
   if (!list.length) return `<div class="pk-empty">${ui.models ? "No model matches." : "Loading models…"}</div>`;
   return list.slice(0, 120).map((m) => {
     const c = cheapest(m);
-    const meta = [`${m.providers.length} provider${m.providers.length === 1 ? "" : "s"}`, ctx(m.context), m.tools ? "tools" : "no tool calls"].filter(Boolean).join(" · ");
+    const n = (m.providers || []).length;
+    const meta = [`${n} provider${n === 1 ? "" : "s"}`, ctx(m.context), m.tools ? "tools" : "no tool calls"].filter(Boolean).join(" · ");
     return `<button type="button" class="pk-row${m.id === ui.hf.model ? " sel" : ""}" data-model="${esc(m.id)}">
       <span class="pk-name">${esc(leaf(m.id))}${m.id === ui.hf.model ? icon("check", 13, "tick") : ""}</span>
       <span class="pk-meta">${esc(org(m.id))}${org(m.id) ? " · " : ""}${esc(meta)}</span><span class="pk-price">${esc(price(c))}</span></button>`;
