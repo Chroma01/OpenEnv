@@ -221,13 +221,62 @@ def _registry_task_dirs(spec: str) -> list[Path]:
     return [Path(str(t.get_local_path())) for t in task_configs]
 
 
-def read_instruction(task_dir: Path, *, limit: int = 4000) -> str:
+def _dataset_folder(spec: str, task_dir: Path) -> Path | None:
+    """The folder a dataset's files must stay in, with a link to that folder itself followed (an
+    operator may serve `~/datasets/current`): the local folder, the Hub download, or Harbor's cache
+    for a registry task. `None` for a registry task Harbor keeps elsewhere (a local path its
+    registry names), which Harbor has already resolved."""
+    path = Path(spec).expanduser()
+    if path.is_dir():
+        return path.resolve()
+    if _is_hf_repo(spec):
+        return (_DATASET_ROOT / spec.replace("/", "__")).resolve()
+    try:
+        from harbor.constants import CACHE_DIR
+    except ImportError:
+        return None
+    if task_dir.absolute().is_relative_to(CACHE_DIR.absolute()):
+        return CACHE_DIR.resolve()
+    return None
+
+
+def task_root(spec: str | None, task_dir: Path) -> Path | None:
+    """The one folder a task's files are read from to be shown (the Task API's instruction, and
+    everything the UI shows): `task_dir` resolved, or `None` when a link (the task folder, `tasks/`,
+    anything between) takes it outside its dataset, and then nothing in it is read. Without a
+    dataset to anchor on, the task folder may not be a link. Rollouts are not affected: Harbor
+    reads a task for itself."""
+    real = task_dir.resolve()
+    folder = _dataset_folder(spec, task_dir) if spec else None
+    if folder is None:
+        return None if task_dir.is_symlink() else real
+    return real if real.is_relative_to(folder) else None
+
+
+def own_file(root: Path | None, name: str) -> Path:
+    """`root / name` when it resolves inside the task's root (see `task_root`), else `OSError`,
+    which readers already treat as a missing file."""
+    if root is None:
+        raise OSError("this task's folder is outside its dataset")
+    path = root / name
+    if not path.resolve().is_relative_to(root):
+        raise OSError(f"{name} points outside its task")
+    return path
+
+
+def read_instruction(
+    task_dir: Path, *, limit: int = 4000, spec: str | None = None
+) -> str:
     """The task's prompt, for previewing in discovery. Truncated: this is not the authoritative copy.
 
     The sandbox gets the real instruction from Harbor at run time. Serving a huge prompt over the
-    Task API for every listed task would make `list_tasks` enormous for no benefit.
+    Task API for every listed task would make `list_tasks` enormous for no benefit. Read only
+    inside the task's dataset (`task_root`), since the Task API is public on a Space.
     """
-    path = task_dir / "instruction.md"
+    try:
+        path = own_file(task_root(spec, task_dir), "instruction.md")
+    except OSError:
+        return ""
     if not path.is_file():
         return ""
     text = path.read_text(errors="replace").strip()
@@ -335,5 +384,5 @@ class HarborTaskProvider:
             task_id=str(task_dir),
             task_name=task_dir.name,
             dataset=spec,
-            instruction=read_instruction(task_dir),
+            instruction=read_instruction(task_dir, spec=spec),
         )

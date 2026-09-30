@@ -488,7 +488,10 @@ def test_tasks_that_read_the_server_environment_are_found(monkeypatch, tmp_path)
         "openenv.harbor.tasks.HarborTaskProvider.task_dir", lambda *a: task
     )
     # the fake task folder is under tmp_path, so that is its dataset's folder
-    monkeypatch.setattr(ui_data, "_dataset_folder", lambda spec: tmp_path.resolve())
+    monkeypatch.setattr(
+        "openenv.harbor.tasks._dataset_folder",
+        lambda spec, task_dir: tmp_path.resolve(),
+    )
     assert not ui_data.reads_environment("org/x", 0)
     (task / "environment" / "docker-compose.yaml").write_text(
         "environment:\n  - T=$HF_TOKEN\n"
@@ -556,7 +559,10 @@ def test_a_compose_file_that_reads_the_host_is_found(monkeypatch, tmp_path):
         "openenv.harbor.tasks.HarborTaskProvider.task_dir", lambda *a: task
     )
     # the fake task folder is under tmp_path, so that is its dataset's folder
-    monkeypatch.setattr(ui_data, "_dataset_folder", lambda spec: tmp_path.resolve())
+    monkeypatch.setattr(
+        "openenv.harbor.tasks._dataset_folder",
+        lambda spec, task_dir: tmp_path.resolve(),
+    )
     included = (
         task / "environment" / "sub" / "base.yaml"
     )  # one compose file can include another
@@ -623,7 +629,10 @@ def test_env_reads_are_found_in_what_harbor_and_compose_decode(monkeypatch, tmp_
         "openenv.harbor.tasks.HarborTaskProvider.task_dir", lambda *a: task
     )
     # the fake task folder is under tmp_path, so that is its dataset's folder
-    monkeypatch.setattr(ui_data, "_dataset_folder", lambda spec: tmp_path.resolve())
+    monkeypatch.setattr(
+        "openenv.harbor.tasks._dataset_folder",
+        lambda spec, task_dir: tmp_path.resolve(),
+    )
     toml, compose = task / "task.toml", task / "environment" / "docker-compose.yaml"
     toml.write_text("[verifier]\ntimeout_sec = 60\n")
 
@@ -1539,7 +1548,10 @@ def test_a_link_in_a_task_counts_as_reading_the_host(monkeypatch, tmp_path):
         "openenv.harbor.tasks.HarborTaskProvider.task_dir", lambda *a: task
     )
     # the fake task folder is under tmp_path, so that is its dataset's folder
-    monkeypatch.setattr(ui_data, "_dataset_folder", lambda spec: tmp_path.resolve())
+    monkeypatch.setattr(
+        "openenv.harbor.tasks._dataset_folder",
+        lambda spec, task_dir: tmp_path.resolve(),
+    )
     assert not ui_data.reads_environment("org/x", 0)
     (task / "environment" / "compose.yaml").symlink_to(host / "compose.yaml")
     assert ui_data.reads_environment("org/x", 0), "a compose file that is a link"
@@ -1594,3 +1606,49 @@ def test_a_served_dataset_is_read_only_inside_its_own_folder(tmp_path):
     assert "Do the task." in detail["instruction"] and detail["files"]
     assert "text" in ui_data.read_task_file(spec, 0, "instruction.md")
     assert not ui_data.reads_environment(spec, 0)
+
+
+def test_the_task_api_reads_instructions_only_inside_the_dataset(tmp_path):
+    """The Task API is public on a Space: its instruction preview follows the page's rule."""
+    from openenv.harbor import tasks
+
+    host = tmp_path / "host"
+    host.mkdir()
+    (host / "instruction.md").write_text("DIRSECRET\n")
+    (host / "token").write_text("TOKENSECRET\n")
+    suite = tmp_path / "suite" / "tasks"
+    for name in ("a_linked_file", "b_own"):
+        (suite / name).mkdir(parents=True)
+        (suite / name / "task.toml").write_text("")
+    (suite / "a_linked_file" / "instruction.md").symlink_to(host / "token")
+    (suite / "b_own" / "instruction.md").write_text("Do the task.\n")
+    (suite / "c_linked_task").symlink_to(host)
+    spec = str(tmp_path / "suite")
+    tasks._CACHE.pop(spec, None)
+    refs = tasks.HarborTaskProvider([spec]).get_task_range(spec)
+    shown = {r["task_name"]: r["instruction"] for r in refs}
+    assert shown == {"a_linked_file": "", "b_own": "Do the task.", "c_linked_task": ""}
+
+
+def test_a_registry_task_is_read_only_inside_harbors_cache(monkeypatch, tmp_path):
+    """A registry dataset is a git checkout in Harbor's cache, and git keeps links: the cache is its
+    anchor, so a link out of it is not followed."""
+    import harbor.constants
+    from openenv.harbor import tasks, ui_data
+
+    cache = tmp_path / "cache"
+    host = tmp_path / "host"
+    (host / "t").mkdir(parents=True)
+    (host / "t" / "instruction.md").write_text("REGSECRET\n")
+    (cache / "tasks" / "id1" / "own").mkdir(parents=True)
+    (cache / "tasks" / "id1" / "own" / "instruction.md").write_text("Do the task.\n")
+    (cache / "tasks" / "id2").symlink_to(
+        host
+    )  # a folder in the cache that is a link out of it
+    monkeypatch.setattr(harbor.constants, "CACHE_DIR", cache)
+    own, linked = cache / "tasks" / "id1" / "own", cache / "tasks" / "id2" / "t"
+    assert tasks.task_root("reg@1.0", own) == own.resolve()
+    assert tasks.task_root("reg@1.0", linked) is None
+    assert tasks.read_instruction(linked, spec="reg@1.0") == ""
+    assert "REGSECRET" not in str(ui_data.task_row(0, linked, "reg@1.0"))
+    assert tasks.read_instruction(own, spec="reg@1.0") == "Do the task."

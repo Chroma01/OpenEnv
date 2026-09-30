@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from .tasks import HarborTaskProvider, resolve_task_dirs
+from .tasks import HarborTaskProvider, own_file as _own, resolve_task_dirs, task_root
 
 # Metadata keys that hold the answer. Harbor puts no rules on `[metadata]`, and some datasets keep
 # the gold answer there (`gold_answer = "4"`). The raw `task.toml` stays viewable, the dataset is
@@ -43,42 +43,6 @@ def _hub_not_found(exc: Exception) -> bool:
         return True
     response = getattr(exc, "response", None)
     return getattr(response, "status_code", None) == 404
-
-
-def _dataset_folder(spec: str) -> Path | None:
-    """The folder a dataset's files must stay in, with a link to the folder itself followed (an
-    operator may serve `~/datasets/current`). `None` for a Harbor registry dataset, whose tasks
-    live in Harbor's own cache."""
-    from . import tasks
-
-    path = Path(spec).expanduser()
-    if path.is_dir():
-        return path.resolve()
-    if tasks._is_hf_repo(spec):
-        return (tasks._DATASET_ROOT / spec.replace("/", "__")).resolve()
-    return None
-
-
-def task_root(spec: str | None, task_dir: Path) -> Path | None:
-    """The one folder the page reads a task's files from: `task_dir` resolved, or `None` when a
-    link (the task folder, `tasks/`, anything between) takes it outside its dataset, and then
-    nothing in it is read. Without a dataset to anchor on, the task folder may not be a link."""
-    real = task_dir.resolve()
-    folder = _dataset_folder(spec) if spec else None
-    if folder is None:
-        return None if task_dir.is_symlink() else real
-    return real if real.is_relative_to(folder) else None
-
-
-def _own(root: Path | None, name: str) -> Path:
-    """`root / name`, for a file the page reads by itself, when it resolves inside the task's root
-    (see `task_root`); callers already treat an `OSError` as a missing file."""
-    if root is None:
-        raise OSError("this task's folder is outside its dataset")
-    path = root / name
-    if not path.resolve().is_relative_to(root):
-        raise OSError(f"{name} points outside its task")
-    return path
 
 
 def _first_link(root: Path) -> Path | None:
