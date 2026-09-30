@@ -817,6 +817,13 @@ def _verdict(r: dict[str, Any]) -> tuple[str, str, str, str]:
     reward = r.get("reward")
     if not r.get("ok"):
         return "bad", "Failed", "–", "none"
+    if reward is None and len(r.get("rewards") or {}) > 1:
+        return (
+            "warn",
+            "Graded",
+            "–",
+            "none",
+        )  # every reward is listed below; none is the headline
     if reward is None:
         return "warn", "Not graded", "–", "none"
     value = float(reward)
@@ -835,6 +842,8 @@ def _result_html(r: dict[str, Any]) -> str:
     reward = r.get("reward")
     if not r.get("ok"):
         caption = _e(r.get("exception_type") or "the rollout did not finish")
+    elif reward is None and len(r.get("rewards") or {}) > 1:
+        caption = "several rewards, none named reward: <code>serve --reward-key</code> picks one"
     elif reward is None:
         caption = "the verifier did not produce a reward"
     else:

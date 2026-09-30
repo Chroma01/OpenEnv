@@ -353,6 +353,16 @@ async function removeDataset(spec) {
   render(); renderAdd();
 }
 
+// A `#task=<spec>:<index>` link opens that task: on load, and when one is pasted into an open page
+// (the page's own URL updates use replaceState, which fires no hashchange).
+function openFromHash() {
+  const m = /#task=([^:]+):(\d+)/.exec(location.hash || "");
+  if (!m) return;
+  const want = decodeURIComponent(m[1]);
+  if (st.datasets.some((d) => d.spec === want)) trigger("select", { spec: want, index: Number(m[2]) });
+}
+window.addEventListener("hashchange", openFromHash);
+
 // ── start ───────────────────────────────────────────────────────────────
 $(".tb-search-ic").outerHTML = icon("search", 16);
 $(".tb-random").innerHTML = `${icon("shuffle", 15)} Random`;
@@ -363,11 +373,7 @@ $(".tb-random").innerHTML = `${icon("shuffle", 15)} Random`;
     st.datasets = info.datasets.map((d) => ({ ...d })); st.canAdd = info.can_add;
     for (const d of st.datasets) labels[d.spec] = d.label || d.spec;
     st.loading -= 1;
-    const m = /#task=([^:]+):(\d+)/.exec(location.hash || "");
-    if (m) {
-      const want = decodeURIComponent(m[1]);
-      if (st.datasets.some((d) => d.spec === want)) trigger("select", { spec: want, index: Number(m[2]) });
-    }
+    openFromHash();
     if (!st.datasets.length) {
       render();
       $(".tb-list").innerHTML = `<li style="grid-column:1/-1"><div class="hb-empty">${icon("database", 20)}<h3>No datasets</h3><p>Start the server with <code>--dataset</code>${st.canAdd ? ", or add one from the Hub under Filters" : ""}.</p></div></li>`;

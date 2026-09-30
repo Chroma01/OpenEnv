@@ -318,6 +318,7 @@ a Space), and some have a flag on `serve` and `push` (`--private-urls` is on `se
 | Add and remove Hub datasets from the page | `OPENENV_HARBOR_UI_ADD_DATASETS` | `--add-datasets` | on | off | off |
 | Who sees runs (`all` or `own`) | `OPENENV_HARBOR_RUN_VISIBILITY` | `--run-visibility` | all | all | own |
 | Keep finished runs across restarts | `OPENENV_HARBOR_RUN_HISTORY` | `--run-history` | on | on | off |
+| Headline reward of a task with several | `OPENENV_HARBOR_REWARD_KEY` | `--reward-key` | unset | unset | unset |
 | Rollouts at once | `OPENENV_HARBOR_UI_MAX_RUNS` | | 4 | 4 | 4 |
 | Rollouts at once per visitor | `OPENENV_HARBOR_UI_MAX_RUNS_PER_VISITOR` | | 4 | 4 | 2 |
 
@@ -456,6 +457,7 @@ Start the env server: Task API for discovery, one long-running `run_rollout` MCP
 | `--add-datasets/--no-add-datasets` | flag | unset | UI visitors may add and remove Hub datasets |
 | `--rollouts/--no-rollouts` | flag | unset | UI visitors may start rollouts |
 | `--private-urls/--no-private-urls` | flag | unset | UI visitors may connect an endpoint on a private or local address |
+| `--reward-key` | str | unset | The reward UI runs report for tasks with several and none named `reward`. Unset, such a run lists each one |
 
 An unset UI flag keeps the default for where the server runs.
 
@@ -481,7 +483,7 @@ Deploy the same server to a Hugging Face Space.
 | `--env-file` | path | `""` | dotenv whose provider keys become Space **secrets** |
 
 `push` also takes the UI flags of `serve` (`--share-endpoint`, `--visitor-endpoints`,
-`--run-visibility`, `--run-history`, `--add-datasets`, `--rollouts`) and sets them as Space
+`--run-visibility`, `--run-history`, `--add-datasets`, `--rollouts`, `--reward-key`) and sets them as Space
 variables. Unlike `serve`, it doesn't share the endpoint with UI visitors unless `--share-endpoint` is
 given. Each push reconciles these UI variables: an omitted flag removes an earlier override and
 returns to the Space default, so a one-time `--share-endpoint` does not stay enabled forever.

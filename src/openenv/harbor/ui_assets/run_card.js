@@ -151,7 +151,8 @@ function render() {
     // overwritten from Python, so an edit not yet connected survives a re-render.
     ui.stamp = v.stamp; ui.busy = ""; ui.quiet = false;
   }
-  if (!v.rollouts) {
+  // `false` from the server, not merely absent: an empty card (before its first value) is not read-only
+  if (v.rollouts === false) {
     element.innerHTML = `<div class="rc hb-panel">
       <div class="hb-panel-h"><h3>${icon("file", 15)}Read-only server</h3></div>
       <div class="hb-panel-b"><div class="hb-note"><span><b>This server is a read-only task browser.</b> You can inspect tasks and prior runs, but it does not accept model credentials or start agents and sandboxes.</span></div></div>

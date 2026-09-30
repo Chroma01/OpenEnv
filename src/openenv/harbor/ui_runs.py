@@ -415,7 +415,7 @@ async def _rollout(
     comes from a real probe of that endpoint, cached after the first run.
     """
     from . import rollout as _rollout_module
-    from .ui_settings import url_problem
+    from .ui_settings import load as load_settings, url_problem
 
     pool = service.capture.app.state.upstreams
     upstream = _visitor_upstream(engine)
@@ -442,6 +442,9 @@ async def _rollout(
             os.environ.get("OPENENV_HARBOR_TRIALS_DIR", "/tmp/openenv-harbor-trials")
         ),
         dataset=spec,
+        # A page's run is for reading: several rewards with none chosen are shown, not a failure.
+        reward_key=load_settings().reward_key,
+        require_reward=False,
         capture_level=level,
         purpose=str(engine.get("purpose") or "eval"),
         upstream=upstream,

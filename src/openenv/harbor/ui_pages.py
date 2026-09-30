@@ -477,20 +477,19 @@ def _stepper(rec: dict[str, Any], live: Any, turns: int) -> str:
     elif result:
         n = int(result.get("n_turns") or 0)
         reward = result.get("reward")
+        several = len(result.get("rewards") or {}) > 1
+        if result.get("ok") and reward is not None:
+            graded = ("ok", "Result", f"reward {float(reward):.2f}")
+        elif result.get("ok") and several:
+            graded = ("ok", "Result", _plural(len(result["rewards"]), "reward"))
+        elif result.get("ok"):
+            graded = ("bad", "Result", "not graded")
+        else:
+            graded = ("bad", "Result", _e(result.get("exception_type") or "failed"))
         states = [
             ("ok", "Setup", "ready"),
             ("ok" if n else "bad", "Agent", _plural(n, "model call")),
-            (
-                ("ok", "Result", f"reward {float(reward):.2f}")
-                if result.get("ok") and reward is not None
-                else (
-                    "bad",
-                    "Result",
-                    "not graded"
-                    if result.get("ok")
-                    else _e(result.get("exception_type") or "failed"),
-                )
-            ),
+            graded,
         ]
     else:
         states = [
@@ -801,7 +800,7 @@ def compare_html(records: list[dict[str, Any] | None]) -> str:
 
 
 def _on(value: Any) -> str:
-    if value is None:
+    if value is None or value == "":
         return '<span class="faint">not set</span>'
     if isinstance(value, bool):
         return f'<span class="hb-status {"ok" if value else ""}">{"on" if value else "off"}</span>'

@@ -1430,7 +1430,7 @@ def test_read_only_ui_hides_rollout_controls():
 
     source = _asset("run_card.js")
     assert "This server is a read-only task browser." in source
-    assert "if (!v.rollouts)" in source
+    assert "if (v.rollouts === false)" in source, "an empty card is not read-only"
 
 
 def test_a_task_row_lists_its_keywords_once(tmp_path):
@@ -1652,3 +1652,60 @@ def test_a_registry_task_is_read_only_inside_harbors_cache(monkeypatch, tmp_path
     assert tasks.read_instruction(linked, spec="reg@1.0") == ""
     assert "REGSECRET" not in str(ui_data.task_row(0, linked, "reg@1.0"))
     assert tasks.read_instruction(own, spec="reg@1.0") == "Do the task."
+
+
+def test_a_page_run_with_several_rewards_is_shown_not_failed(monkeypatch, tmp_path):
+    """A task can report several rewards with none named `reward` (SmolDataEnvs: `correctness`,
+    `submission`). A trainer must choose; a page's run shows them all, and `--reward-key` picks the
+    headline one."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from openenv.harbor import rollout, ui_runs
+    from openenv.harbor.ui_trace import _result_html, _verdict
+
+    seen = {}
+
+    async def run(**kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(rollout, "run_rollout", run)
+    service = SimpleNamespace(
+        capture=SimpleNamespace(
+            registry=None,
+            app=SimpleNamespace(
+                state=SimpleNamespace(upstreams=SimpleNamespace(default=(None, "text")))
+            ),
+        ),
+        public_url="",
+        capture_level="text",
+        model="m",
+    )
+    args = ({"server_default": True}, tmp_path, "org/x", "terminus-2", "e2b", service)
+    monkeypatch.delenv("OPENENV_HARBOR_REWARD_KEY", raising=False)
+    asyncio.run(ui_runs._rollout(*args, lambda s: None))
+    assert seen["require_reward"] is False and seen["reward_key"] == ""
+    monkeypatch.setenv("OPENENV_HARBOR_REWARD_KEY", "correctness")
+    asyncio.run(ui_runs._rollout(*args, lambda s: None))
+    assert seen["reward_key"] == "correctness"
+
+    shown = {
+        "ok": True,
+        "reward": None,
+        "rewards": {"correctness": 1.0, "submission": 1.0},
+    }
+    assert _verdict(shown)[1] == "Graded"
+    page = _result_html(shown)
+    assert "--reward-key" in page and "correctness" in page and "submission" in page
+
+
+def test_the_reward_key_is_a_serve_and_push_setting():
+    from openenv.cli.commands import harbor
+
+    assert harbor._ui_env(None, None, "", None, reward_key=" correctness ") == {
+        "OPENENV_HARBOR_REWARD_KEY": "correctness"
+    }
+    assert "OPENENV_HARBOR_REWARD_KEY" in harbor._UI_VARIABLES, (
+        "a re-push without it resets it"
+    )

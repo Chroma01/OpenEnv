@@ -109,6 +109,11 @@ _UI_VARIABLES = (
     "OPENENV_HARBOR_UI_ADD_DATASETS",
     "OPENENV_HARBOR_UI_ROLLOUTS",
     "OPENENV_HARBOR_RUN_VISIBILITY",
+    "OPENENV_HARBOR_REWARD_KEY",
+)
+_REWARD_KEY_HELP = (
+    "Which reward UI runs report for tasks with several and none named `reward`, or a "
+    "comma-separated preference order. Unset, such a run shows each of them instead."
 )
 
 
@@ -120,6 +125,7 @@ def _ui_env(
     add_datasets: Optional[bool] = None,
     rollouts: Optional[bool] = None,
     private_urls: Optional[bool] = None,
+    reward_key: str = "",
 ) -> dict[str, str]:
     """The UI's deployment settings as the variables `openenv.harbor.ui_settings` reads.
 
@@ -142,6 +148,8 @@ def _ui_env(
             out[name] = "1" if value else "0"
     if run_visibility:
         out["OPENENV_HARBOR_RUN_VISIBILITY"] = run_visibility
+    if reward_key.strip():
+        out["OPENENV_HARBOR_REWARD_KEY"] = reward_key.strip()
     return out
 
 
@@ -384,6 +392,9 @@ def serve(
         Optional[bool],
         typer.Option("--private-urls/--no-private-urls", help=_PRIVATE_URLS_HELP),
     ] = None,
+    reward_key: Annotated[
+        str, typer.Option("--reward-key", help=_REWARD_KEY_HELP)
+    ] = "",
 ) -> None:
     """Serve Harbor tasks over the OpenEnv Task API and MCP.
 
@@ -402,6 +413,7 @@ def serve(
             add_datasets,
             rollouts,
             private_urls,
+            reward_key,
         )
     )
     # The UI's laptop defaults (this machine's token, private URLs) are for a loopback-only server.
@@ -508,6 +520,9 @@ def push(
         Optional[bool],
         typer.Option("--rollouts/--no-rollouts", help=_ROLLOUTS_HELP),
     ] = None,
+    reward_key: Annotated[
+        str, typer.Option("--reward-key", help=_REWARD_KEY_HELP)
+    ] = "",
 ) -> None:
     """Deploy this environment to a Hugging Face Space.
 
@@ -531,6 +546,7 @@ def push(
         run_history,
         add_datasets,
         rollouts,
+        reward_key=reward_key,
     )
     if not share_endpoint and visitor_endpoints is False:
         # On a Space the endpoint is shared only when asked, so unset counts as not shared.

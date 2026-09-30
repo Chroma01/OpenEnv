@@ -62,6 +62,10 @@ class UISettings:
     bucket: str | None = None
     bucket_mount: Path | None = None
     hf_login: bool = False
+    # Which of a task's rewards is the headline one when it has several and none is named `reward`
+    # (`serve --reward-key`, the same choice `rollout --reward-key` makes). Without it the run shows
+    # every reward and none as the headline, rather than failing a task the agent may have solved.
+    reward_key: str = ""
 
 
 def _count(env: str, default: int) -> int:
@@ -114,6 +118,7 @@ def load() -> UISettings:
         bucket_mount=_mount(),
         # Sign-in exists only where the Hub has set up OAuth for the Space (`hf_oauth: true`).
         hf_login=space and bool(os.environ.get("OAUTH_CLIENT_ID")),
+        reward_key=(os.environ.get("OPENENV_HARBOR_REWARD_KEY") or "").strip(),
     )
 
 
@@ -192,6 +197,13 @@ ROWS = (
         "OPENENV_HARBOR_UI_ADD_DATASETS",
         "--add-datasets",
         "Public Hub datasets only, copied into the configured Space bucket or otherwise downloaded to this server. Their tasks may not read the server's environment variables. Default on only when the server listens on this machine alone.",
+    ),
+    Row(
+        "reward_key",
+        "Headline reward",
+        "OPENENV_HARBOR_REWARD_KEY",
+        "--reward-key",
+        "Which reward a run reports, for tasks with several and none named `reward` (a comma-separated preference order is accepted). Unset, such a run shows each of them.",
     ),
     Row(
         "max_runs",
