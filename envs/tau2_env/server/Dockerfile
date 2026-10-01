@@ -29,6 +29,7 @@ ENV PYTHONPATH="/app/env:$PYTHONPATH"
 # The simulated user runs on Hugging Face Inference Providers by default. On a Space,
 # visitors sign in and use their own token. API clients need HF_TOKEN, or
 # TAU2_USER_PROVIDER=openai|anthropic with that provider's key.
+ENV ENABLE_WEB_INTERFACE=true
 ENV TAU2_DOMAIN="airline"
 ENV TAU2_SPLIT="test"
 ENV TAU2_USER_PROVIDER="hf"

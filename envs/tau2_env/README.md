@@ -95,7 +95,7 @@ git -C tau2-bench sparse-checkout set --no-cone data/tau2/domains data/tau2/user
 git -C tau2-bench checkout 5bfa7e37b36656b37dc6d022156be6563c1007f3
 
 cd envs/tau2_env
-TAU2_DATA_DIR=../../tau2-bench/data HF_TOKEN=hf_... uv run server
+TAU2_DATA_DIR=../../tau2-bench/data HF_TOKEN=hf_... ENABLE_WEB_INTERFACE=true uv run server
 ```
 
 The Docker image does this at build time.

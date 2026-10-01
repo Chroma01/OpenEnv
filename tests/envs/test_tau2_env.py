@@ -21,7 +21,6 @@ pytest.importorskip("tau2", reason="τ²-bench is not installed")
 import litellm
 import tau2.evaluator.evaluator_nl_assertions as nl_assertions
 import tau2.utils.llm_utils as llm_utils
-import tau2_env.server.tau2_environment as tau2_environment
 from openenv.core.env_server.mcp_types import (
     CallToolAction,
     CallToolObservation,
@@ -122,8 +121,7 @@ def test_each_conversation_has_its_own_judge(monkeypatch):
     """Two conversations judged at the same time each use their own token."""
     judged = {}
     monkeypatch.setattr(
-        tau2_environment,
-        "generate",
+        "tau2_env.server.tau2_environment.generate",
         lambda **kwargs: judged.setdefault(threading.current_thread().name, kwargs),
     )
     both_stepping = threading.Barrier(2)
@@ -164,3 +162,10 @@ def test_server_and_ui_start_without_credentials(monkeypatch):
     # The sign-in routes Gradio expects at the root forward to the UI under /web.
     login = client.get("/login/huggingface?_target_url=/", follow_redirects=False)
     assert login.headers["location"] == "/web/login/huggingface?_target_url=/"
+
+
+def test_done_ends_the_conversation(env, scripted_user):
+    scripted_user.append("Hi, I'd like to change my flight.")
+    env.reset(task_id="2")
+    observation = env.step(CallToolAction(tool_name="done", arguments={}))
+    assert observation.done and env.state.done

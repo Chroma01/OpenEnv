@@ -112,6 +112,11 @@ def _judge_generate(**kwargs):
 nl_assertions.generate = _judge_generate
 
 
+# `respond_to_user` and `done` wait on the simulated customer (and on retail, the judge),
+# which are LLM calls with retries, so tool calls get longer than MCP's 30 s default.
+TOOL_TIMEOUT_S = 300.0
+
+
 # What FastMCP gives a function tool returning `str`, so clients get the text as `.data`.
 TEXT_OUTPUT = {
     "type": "object",
@@ -307,14 +312,18 @@ class Tau2Environment(MCPEnvironment):
         self, action: Action, timeout_s: Optional[float] = None, **kwargs: Any
     ) -> Observation:
         self._state.step_count += 1
-        return self._finish(super().step(action, timeout_s=timeout_s, **kwargs))
+        return self._finish(
+            super().step(action, timeout_s=timeout_s or TOOL_TIMEOUT_S, **kwargs)
+        )
 
     async def step_async(
         self, action: Action, timeout_s: Optional[float] = None, **kwargs: Any
     ) -> Observation:
         self._state.step_count += 1
         return self._finish(
-            await super().step_async(action, timeout_s=timeout_s, **kwargs)
+            await super().step_async(
+                action, timeout_s=timeout_s or TOOL_TIMEOUT_S, **kwargs
+            )
         )
 
     def _step_impl(

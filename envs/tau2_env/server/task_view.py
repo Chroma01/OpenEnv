@@ -186,7 +186,7 @@ def timeline_html(events: list[dict], placeholder: str) -> str:
             result = event["result"]
             try:
                 result = json.dumps(json.loads(result), indent=2)
-            except ValueError:
+            except ValueError:  # not JSON, so it is shown as it came
                 pass
             failed = result.startswith("Error")
             rows.append(
