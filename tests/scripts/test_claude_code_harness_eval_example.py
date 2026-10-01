@@ -116,6 +116,7 @@ def test_claude_code_exiting_mid_turn_ends_the_conversation(tmp_path, customer):
 
 
 def test_claude_code_going_quiet_is_a_timeout(tmp_path, customer):
+    customer += ["Hi, my user id is noah_muller_9847."]
     tau2, _, harness = start(tmp_path, session_timeout_s=1.0)
     try:
         harness.reset()
