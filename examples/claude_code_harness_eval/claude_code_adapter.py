@@ -24,7 +24,7 @@ from openenv.core.harness import (
     HarnessEventType,
     HarnessProcess,
 )
-from openenv.core.harness.adapter import HarnessError
+from openenv.core.harness.adapter import HarnessError, HarnessTurnTimeoutError
 
 MCP_SERVER_NAME = "env"
 # Claude Code exposes MCP tools as `mcp__<server>__<tool>`.
@@ -122,7 +122,11 @@ class ClaudeCodeAdapter(AgenticHarnessAdapter):
             line = await self._process.read_line(
                 timeout_s=self.config.session_timeout_s
             )
-            if line is None:
+            if line is None:  # EOF, or nothing for `session_timeout_s`
+                if self._process.is_running():
+                    raise HarnessTurnTimeoutError(
+                        f"Claude Code sent nothing for {self.config.session_timeout_s} s"
+                    )
                 raise HarnessError(
                     f"Claude Code exited mid-turn: {self._process.drain_stderr()}"
                 )

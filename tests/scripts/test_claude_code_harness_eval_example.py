@@ -25,7 +25,7 @@ sys.path.insert(0, str(_REPO_ROOT / "examples" / "claude_code_harness_eval"))
 
 import litellm
 import tau2.utils.llm_utils as llm_utils
-from openenv.core.harness import HarnessConfig
+from openenv.core.harness import HarnessAction, HarnessConfig
 from tau2_env.server.tau2_environment import Tau2Environment
 from tau2_harness import AGENT_PROMPT, converse, harness_for
 
@@ -49,7 +49,7 @@ def customer(monkeypatch):
     return replies
 
 
-def start(tmp_path: Path):
+def start(tmp_path: Path, session_timeout_s: float = 30.0):
     tau2 = Tau2Environment(domain="airline", split="test")
     observation = tau2.reset(task_id="2")
     config = HarnessConfig(
@@ -58,7 +58,7 @@ def start(tmp_path: Path):
         working_directory=str(tmp_path),
         env_vars={"FAKE_CLAUDE_ARGV": str(tmp_path / "argv.json")},
         model="haiku",
-        session_timeout_s=30.0,
+        session_timeout_s=session_timeout_s,
     )
     harness = harness_for(tau2, observation.metadata["policy"], config)
     return tau2, observation, harness
@@ -113,3 +113,16 @@ def test_claude_code_exiting_mid_turn_ends_the_conversation(tmp_path, customer):
     assert turn.done
     assert turn.metadata["error_type"] == "harness_crashed"
     assert "exited mid-turn" in turn.metadata["error"]
+
+
+def test_claude_code_going_quiet_is_a_timeout(tmp_path, customer):
+    tau2, _, harness = start(tmp_path, session_timeout_s=1.0)
+    try:
+        harness.reset()
+        # A step allowed longer than the adapter's silence limit hits the adapter's limit.
+        turn = harness.step(HarnessAction(message="stall"), timeout_s=30.0)
+    finally:
+        harness.close()
+
+    assert turn.done
+    assert turn.metadata["error_type"] == "turn_timeout"

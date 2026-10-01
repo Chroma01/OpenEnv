@@ -8,7 +8,8 @@ Code does, and calls the environment's tools for real over the MCP server
 passed in `--mcp-config`:
 
 - every message makes it look the customer up with `get_user_details`;
-- a message containing "crash" makes the process exit mid-turn.
+- a message containing "crash" makes the process exit mid-turn;
+- a message containing "stall" makes it go quiet without exiting.
 
 `$FAKE_CLAUDE_ARGV` names a file where the command line is written, so the
 test can check the flags the adapter passed.
@@ -32,6 +33,8 @@ async def run_turn(message: str, url: str) -> None:
     emit({"type": "system", "subtype": "init", "tools": []})
     if "crash" in message:
         sys.exit(3)
+    if "stall" in message:
+        await asyncio.sleep(60)
     name, arguments = "get_user_details", {"user_id": "noah_muller_9847"}
     emit(
         {

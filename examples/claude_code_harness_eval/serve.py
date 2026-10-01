@@ -9,6 +9,10 @@
 Each connection gets its own copy of the task's database and its own Claude Code
 process. You play the customer, so nothing is scored; `/reset` and `/step` are
 not exposed.
+
+`tau2_env` loads a task's database and policy in `reset()`, which also opens the
+conversation with its simulated customer. That message is not used here, but it
+still needs `HF_TOKEN`.
 """
 
 from __future__ import annotations
