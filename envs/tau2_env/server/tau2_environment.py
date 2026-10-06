@@ -37,7 +37,8 @@ from fastmcp.tools import Tool
 from fastmcp.tools.tool import ToolResult
 from openenv.core.env_server.mcp_environment import MCPEnvironment
 from openenv.core.env_server.types import Action, Observation
-from tau2.gym.gym_agent import AgentGymEnv
+from tau2.data_model.message import AssistantMessage
+from tau2.gym.gym_agent import AgentGymEnv, GymAgent
 from tau2.registry import registry
 from tau2.user.user_simulator_base import OUT_OF_SCOPE, STOP, TRANSFER
 from tau2.utils.llm_utils import generate
@@ -99,9 +100,9 @@ def llm_config(
     return f"{provider}/{model}", {"temperature": 0.0, "num_retries": 5}
 
 
-# τ²-bench's retail judge reads its model from module constants, shared by every
-# conversation in the process. It runs in the thread that steps the simulation, so
-# each conversation sets its own judge right before stepping.
+# τ²-bench's natural-language assertion judge reads its model from module constants,
+# shared by every conversation in the process. It runs in the thread that steps the
+# simulation, so each conversation sets its own judge right before stepping.
 _judge = threading.local()
 
 
@@ -171,6 +172,8 @@ class Tau2Environment(MCPEnvironment):
         hf_token (`str`, *optional*):
             Token for the `"hf"` provider, e.g. a visitor's. Defaults to `HF_TOKEN`.
     """
+
+    SUPPORTS_CONCURRENT_SESSIONS = True
 
     def __init__(
         self,
@@ -257,6 +260,7 @@ class Tau2Environment(MCPEnvironment):
                 "Providers by default: set HF_TOKEN, or TAU2_USER_PROVIDER=openai|anthropic."
             )
         task_id = task_id or random.Random(seed).choice(self.task_ids)
+        self._end_conversation()
         self._gym = AgentGymEnv(
             domain=self.domain,
             task_id=task_id,
@@ -286,6 +290,8 @@ class Tau2Environment(MCPEnvironment):
         """Advance the simulation with one agent action and return what came back."""
         if self._gym is None:
             raise RuntimeError("call reset() before calling tools")
+        if self._state.done:
+            return "The conversation has ended."
         _judge.model, _judge.args = self.user_llm, self.user_llm_args
         observation, reward, terminated, _, info = self._gym.step(action)
         if terminated:
@@ -293,6 +299,18 @@ class Tau2Environment(MCPEnvironment):
             self._state.reward = reward
             self._state.reward_info = json.loads(info["reward_info"])
         return observation.removeprefix("user: ").removeprefix("tool: ")
+
+    def _end_conversation(self) -> None:
+        """Stop an unfinished simulation, whose thread otherwise waits for the agent forever."""
+        if self._gym is not None and not self._state.done:
+            # The agent's own stop message ends it without scoring it.
+            self._gym._agent.set_action(
+                AssistantMessage(role="assistant", content=GymAgent.STOP_TOKEN)
+            )
+
+    def close(self) -> None:
+        self._end_conversation()
+        super().close()
 
     def _finish(self, observation: Observation) -> Observation:
         if not self._state.done:

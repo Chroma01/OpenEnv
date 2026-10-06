@@ -250,18 +250,11 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
             Environment factory. Called with no arguments for the server's defaults,
             or with `domain`, `split`, `user_model` and `hf_token` to override them.
     """
-    default = make_env()
-    default_user_model = default.user_llm.split("/", 1)[-1]
 
     @lru_cache(maxsize=None)
     def catalog(domain: str, split: str) -> Catalog:
-        return Catalog(
-            default
-            if (domain, split) == (default.domain, default.split)
-            else make_env(domain=domain, split=split)
-        )
+        return Catalog(make_env(domain=domain, split=split))
 
-    home = catalog(default.domain, default.split)
     css = (ASSETS / "tau2.css").read_text()
     explorer_js = (ASSETS / "explorer.js").read_text()
 
@@ -298,8 +291,12 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
         )
 
     def hf_token(oauth_token: gr.OAuthToken | None) -> str:
-        """The visitor's token when they signed in, else the server's `HF_TOKEN`."""
-        token = (oauth_token and oauth_token.token) or os.environ.get("HF_TOKEN")
+        """The visitor's token on a Space, where signing in is required, else `HF_TOKEN`."""
+        if os.environ.get("SPACE_ID"):
+            # The Space's own secret, if any, stays for the API: visitors pay for their runs.
+            token = oauth_token and oauth_token.token
+        else:
+            token = os.environ.get("HF_TOKEN")
         if not token:
             raise gr.Error(
                 "Sign in with Hugging Face (or set HF_TOKEN) to run conversations. The "
@@ -458,8 +455,9 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
 
     def open_run(runs, evt: gr.SelectData):
         run = next(r for r in runs if r["id"] == evt.value)
+        # A directory per download, so visitors' runs with the same name don't collide.
         path = (
-            Path(tempfile.gettempdir())
+            Path(tempfile.mkdtemp(prefix="tau2-run-"))
             / f"tau2-{run['domain']}-{run['task_id']}-{run['id']}.json"
         )
         path.write_text(json.dumps(run, indent=2, default=str))
@@ -474,12 +472,16 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
         return compare_html(chosen)
 
     html = {"apply_default_css": False, "padding": False}
-    help_text, example = home.tool_help(home.default_tool)
-    models = model_choices()
 
     def builder(
         web_manager, action_fields, metadata, is_chat_env, display_title, quick_start_md
     ):
+        default = make_env()
+        home = catalog(default.domain, default.split)
+        help_text, example = home.tool_help(home.default_tool)
+        models = model_choices()
+        default_user_model = default.user_llm.split("/", 1)[-1]
+
         with gr.Blocks() as demo, gr.Column(elem_classes="t2"):
             gr.HTML(f"<style>{css}</style>", elem_classes="t2-style", **html)
             head = gr.HTML(header(home), **html)

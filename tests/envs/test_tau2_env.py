@@ -13,6 +13,7 @@ airline database and τ²-bench's evaluator are the real ones.
 
 import importlib
 import threading
+import time
 
 import pytest
 
@@ -169,3 +170,34 @@ def test_done_ends_the_conversation(env, scripted_user):
     env.reset(task_id="2")
     observation = env.step(CallToolAction(tool_name="done", arguments={}))
     assert observation.done and env.state.done
+
+
+def test_tools_after_the_end_keep_the_score(env, scripted_user):
+    scripted_user.append("Hi, I'd like to change my flight.")
+    env.reset(task_id="2")
+    env.step(CallToolAction(tool_name="done", arguments={}))
+    reward, reward_info = env.state.reward, env.state.reward_info
+
+    observation = env.step(
+        CallToolAction(
+            tool_name="get_user_details", arguments={"user_id": "noah_muller_9847"}
+        )
+    )
+    assert observation.result.data == "The conversation has ended."
+    assert (env.state.reward, env.state.reward_info) == (reward, reward_info)
+
+
+def test_reset_ends_the_previous_conversation(env, scripted_user):
+    """An abandoned conversation stops its thread without another customer call."""
+    scripted_user.extend(["Hi, I'd like to change my flight."] * 3)
+    env.reset(task_id="2")
+    before = threading.active_count()
+    env.reset(task_id="2")
+    env.reset(task_id="2")
+    env.close()
+    for _ in range(50):
+        if threading.active_count() < before:
+            break
+        time.sleep(0.1)
+    assert threading.active_count() < before
+    assert scripted_user == []

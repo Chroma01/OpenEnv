@@ -22,7 +22,7 @@ The Space opens on a τ²-bench tab. The domain, the split and the simulated cus
 - **Play as the agent**: talk to the simulated customer yourself and call the domain's tools from a form, then see your reward.
 - **Runs**: the runs of your session. Open one to read it again or download it as JSON, or compare two to four side by side.
 
-On a Space, visitors sign in with Hugging Face, and their conversations run on their own [Inference Providers](https://huggingface.co/docs/inference-providers) credits (the Space asks for the `inference-api` scope). Without signing in, the Space's `HF_TOKEN` secret is used if it has one. Browsing the tasks needs neither.
+On a Space, visitors sign in with Hugging Face, and their conversations run on their own [Inference Providers](https://huggingface.co/docs/inference-providers) credits (the Space asks for the `inference-api` scope). Running a conversation requires signing in, and browsing the tasks doesn't.
 
 The runs live in the browser session and are not kept across restarts. The generic OpenEnv playground stays available as a second tab.
 
@@ -99,7 +99,7 @@ docker build -t tau2-env -f envs/tau2_env/server/Dockerfile envs/tau2_env
 docker run -p 8000:8000 -e HF_TOKEN=hf_... tau2-env
 ```
 
-On a Space, the UI's runs use each visitor's own token once they sign in, so the Space needs no secret. An `HF_TOKEN` secret (or the provider's key) is only needed for the API (`reset()`, the MCP tools), and it is also used for visitors who do not sign in, so it pays for their runs. Without credentials the server and the task explorer still run, and `reset()` explains what is missing.
+On a Space, the UI's runs use each visitor's own token once they sign in, so the Space needs no secret. An `HF_TOKEN` secret (or the provider's key) is only needed for the API (`reset()`, the MCP tools), and the UI never uses it. Without credentials the server and the task explorer still run, and `reset()` explains what is missing.
 
 The image starts from a Python 3.12 base rather than `openenv-base`, because τ²-bench requires Python 3.12+.
 
