@@ -12,6 +12,7 @@ It is an evaluation recipe. RFC 005 does not capture token ids, so this is not a
 | [`tau2_harness.py`](tau2_harness.py) | joins `tau2_env` and `HarnessEnvironment`, and runs the conversation |
 | [`run_eval.py`](run_eval.py) | evaluates Claude Code on τ²-bench tasks and reports pass^1 |
 | [`serve.py`](serve.py), [`chat.py`](chat.py) | serve the harness in production mode (`WS /harness`) and talk to it as the customer |
+| [`Dockerfile`](Dockerfile) | runs `serve.py` with Claude Code inside the container |
 
 ## Run it
 
@@ -48,5 +49,7 @@ PYTHONPATH=src:envs:examples/claude_code_harness_eval \
 python examples/claude_code_harness_eval/chat.py ws://localhost:8000/harness \
     "Hi, I'm Noah Muller, user id noah_muller_9847. What reservations do I have?"
 ```
+
+To serve it for others, run it in the container instead: the [`Dockerfile`](Dockerfile) puts Claude Code, `tau2_env` and `serve.py` in one image, as the tutorial describes.
 
 [`tests/scripts/test_claude_code_harness_eval_example.py`](../../tests/scripts/test_claude_code_harness_eval_example.py) covers the adapter offline: a fake `claude` replays the same stream-json events and calls the environment's tools over the real bridge.

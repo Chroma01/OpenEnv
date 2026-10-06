@@ -36,7 +36,7 @@ An `AgenticHarnessAdapter` tells `HarnessEnvironment` how to start a harness, ho
 | `start()` | spawns the process with `HarnessProcess`. Claude Code prints nothing until the first message |
 | `send_message_streaming()` | writes `{"type": "user", "message": {...}}` on stdin and maps stdout events: `tool_use` → `TOOL_CALL`, `tool_result` → `TOOL_RESULT`, `text` → `TEXT_OUTPUT`, and `result` (end of turn) → `TURN_COMPLETE` |
 
-Claude Code's own tools are turned off (`--tools ""`), so the agent can only act through the environment's tools. That makes the example safe to run on a laptop. To give it shell or file tools as well, list them in `--tools` and run it inside a sandbox.
+Claude Code's own tools are turned off (`--tools ""`), so the agent can only act through the environment's tools: it has no shell, no file access and no way to open connections of its own, which keeps the local runs below safe on a laptop. To give it shell or file tools as well, list them in `--tools` and run it in a sandbox: the [container](#serve-it-in-a-container) keeps it away from your machine, and an egress allowlist (for example `ACASandboxProvider.deny_all_egress()`) keeps it to the model's API.
 
 ## Join It to τ²-bench
 
@@ -119,6 +119,19 @@ python examples/claude_code_harness_eval/chat.py ws://localhost:8000/harness \
     "Hi, I'm Noah Muller, user id noah_muller_9847. What reservations do I have?" \
     "Which of them has a delayed flight?"
 ```
+
+### Serve It in a Container
+
+RFC 005 runs the harness inside the environment's container, apart from the machine that serves it. [`examples/claude_code_harness_eval/Dockerfile`](https://github.com/huggingface/OpenEnv/blob/main/examples/claude_code_harness_eval/Dockerfile) does that for this recipe: Claude Code, `tau2_env` and `serve.py` run together in one image, as a non-root user. Build it from the repository root and pass the credentials at run time:
+
+```bash
+docker build -t claude-code-tau2 -f examples/claude_code_harness_eval/Dockerfile .
+docker run -p 8000:8000 -e HF_TOKEN -e ANTHROPIC_API_KEY claude-code-tau2
+python examples/claude_code_harness_eval/chat.py ws://localhost:8000/harness \
+    "Hi, I'm Noah Muller, user id noah_muller_9847. What reservations do I have?"
+```
+
+Use `-e CLAUDE_CODE_OAUTH_TOKEN` instead of `ANTHROPIC_API_KEY` to run on a Claude subscription (`claude setup-token` creates the token). Add `serve.py` arguments after the image name to pick the domain, task or model.
 
 ## Things to Know
 

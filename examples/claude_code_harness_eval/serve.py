@@ -39,6 +39,9 @@ def main() -> None:
     parser.add_argument(
         "--claude", default="claude", help="path to the Claude Code CLI"
     )
+    parser.add_argument(
+        "--host", default="127.0.0.1", help="0.0.0.0 inside a container"
+    )
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
 
@@ -54,7 +57,7 @@ def main() -> None:
         return harness_for(tau2, observation.metadata["policy"], config)
 
     app = create_fastapi_app(make_env, HarnessAction, Observation, mode="production")
-    uvicorn.run(app, host="127.0.0.1", port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
