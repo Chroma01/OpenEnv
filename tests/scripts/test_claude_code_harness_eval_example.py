@@ -120,8 +120,7 @@ def test_claude_code_going_quiet_is_a_timeout(tmp_path, customer):
     tau2, _, harness = start(tmp_path, session_timeout_s=1.0)
     try:
         harness.reset()
-        # A step allowed longer than the adapter's silence limit hits the adapter's limit.
-        turn = harness.step(HarnessAction(message="stall"), timeout_s=30.0)
+        turn = harness.step(HarnessAction(message="stall"))
     finally:
         harness.close()
 

@@ -22,6 +22,8 @@ def main() -> None:
     with connect(url) as websocket:
         started = json.loads(websocket.recv(timeout=60))
         print(f"[{started['type']}] {started.get('data', {})}")
+        if started["type"] != "session_started":  # e.g. the server is busy
+            return
         for message in messages or (line.strip() for line in sys.stdin):
             if not message:
                 continue

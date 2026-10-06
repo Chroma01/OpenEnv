@@ -11,11 +11,10 @@ is done.
 
 from __future__ import annotations
 
-import asyncio
-
 from claude_code_adapter import ClaudeCodeAdapter
 from fastmcp import FastMCP
 from openenv.core.harness import HarnessAction, HarnessConfig, HarnessEnvironment
+from openenv.core.utils import run_async_safely
 from tau2_env.server.tau2_environment import Tau2Environment, without_end_tokens
 
 # Claude Code talks to the customer through its replies, not through these tools.
@@ -31,7 +30,7 @@ AGENT_PROMPT = (
 def domain_tools(tau2: Tau2Environment) -> FastMCP:
     """The domain's tools of a τ²-bench environment, to inject into the harness."""
     mcp = FastMCP(f"tau2_{tau2.domain}")
-    for tool in asyncio.run(tau2.mcp_server.list_tools()):
+    for tool in run_async_safely(tau2.mcp_server.list_tools()):
         if tool.name not in CONVERSATION_TOOLS:
             mcp.add_tool(tool)
     return mcp

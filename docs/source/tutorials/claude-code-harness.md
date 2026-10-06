@@ -2,6 +2,8 @@
 
 This tutorial runs [Claude Code](https://docs.anthropic.com/en/docs/claude-code) *inside* an OpenEnv environment and evaluates it on [τ²-bench](../environments/tau2). It uses `HarnessEnvironment`, the agentic harness wrapper from [RFC 005](https://github.com/huggingface/OpenEnv/blob/main/rfcs/005-agentic-harnesses.md): the harness runs its own agent loop, the environment injects its tools into it over MCP, and each `step()` is one conversational turn.
 
+The tools keep running in the environment's process: `HarnessEnvironment` serves them on a local MCP bridge, and Claude Code calls them over HTTP. This is the environment-side harness API, which is different from the trainer-side session runtime in the [BrowserGym harness tutorial](browsergym-harness).
+
 The full code is in [`examples/claude_code_harness_eval`](https://github.com/huggingface/OpenEnv/tree/main/examples/claude_code_harness_eval).
 
 > [!NOTE]
@@ -71,8 +73,11 @@ harness.reset()
 message = observation.metadata["user_message"]
 while not tau2.state.done:
     turn = harness.step(HarnessAction(message=message))  # one Claude Code turn
+    if turn.done:  # Claude Code exited or ran out of time
+        break
     message = without_end_tokens(tau2.act(turn.metadata["response"]))  # the customer replies
 
+harness.close()
 print(tau2.state.reward)
 ```
 
@@ -99,11 +104,13 @@ reward: 1.00 {'DB': 1.0, 'COMMUNICATE': 1.0}
 pass^1: 3/3
 ```
 
+The first airline test tasks are a gentle start. Tasks 2 and 6 only look things up, so they pass as long as the agent leaves the database as it found it. Task 8 books a reservation, and τ²-bench checks the database it leaves behind.
+
 `--domain` takes any τ²-bench domain, `--task-ids` picks tasks, and `--user-model` changes the simulated customer's model. Each task uses a fresh `tau2_env` and a fresh Claude Code process.
 
 ## Serve It in Production Mode
 
-The same harness can be served over the `WS /harness` route ([production mode](../guides/simulation-vs-production)). Each connection gets its own Claude Code process and its own copy of the task's database, and `/reset` and `/step` are not exposed. Here you play the customer, so nothing is scored:
+The same harness can be served over the `WS /harness` route ([production mode](../guides/simulation-vs-production)). The server takes one connection at a time, each with a fresh Claude Code process and a fresh copy of the task's database, and `/reset` and `/step` are not exposed. Here you play the customer, so nothing is scored:
 
 ```bash
 PYTHONPATH=src:envs:examples/claude_code_harness_eval \

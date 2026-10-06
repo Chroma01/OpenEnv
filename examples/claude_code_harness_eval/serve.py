@@ -6,13 +6,14 @@
         python examples/claude_code_harness_eval/serve.py --domain airline --task-id 2
     python examples/claude_code_harness_eval/chat.py ws://localhost:8000/harness
 
-Each connection gets its own copy of the task's database and its own Claude Code
-process. You play the customer, so nothing is scored; `/reset` and `/step` are
-not exposed.
+The server takes one connection at a time, each with a fresh copy of the task's
+database and its own Claude Code process. You play the customer, so nothing is
+scored; `/reset` and `/step` are not exposed.
 
 `tau2_env` loads a task's database and policy in `reset()`, which also opens the
 conversation with its simulated customer. That message is not used here, but it
-still needs `HF_TOKEN`.
+needs `HF_TOKEN`, and it costs one customer call per connection plus one when the
+server starts (`create_fastapi_app` builds the environment once to check it).
 """
 
 from __future__ import annotations

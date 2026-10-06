@@ -57,6 +57,7 @@ def run_task(task_id: str, args: argparse.Namespace) -> float:
             )
     finally:
         harness.close()
+        tau2.close()
     breakdown = tau2.state.reward_info.get("reward_breakdown", {})
     print(f"reward: {tau2.state.reward:.2f} {breakdown}")
     return tau2.state.reward if tau2.state.done else 0.0

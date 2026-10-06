@@ -20,11 +20,12 @@ from typing import Any, AsyncIterator, Optional
 from openenv.core.env_server.mcp_types import Tool
 from openenv.core.harness import (
     AgenticHarnessAdapter,
+    HarnessConfig,
     HarnessEvent,
     HarnessEventType,
     HarnessProcess,
 )
-from openenv.core.harness.adapter import HarnessError, HarnessTurnTimeoutError
+from openenv.core.harness.adapter import HarnessError
 
 MCP_SERVER_NAME = "env"
 # Claude Code exposes MCP tools as `mcp__<server>__<tool>`.
@@ -48,10 +49,7 @@ class ClaudeCodeAdapter(AgenticHarnessAdapter):
             must follow in this environment.
     """
 
-    # Built-in tools are disabled with `--tools ""`, so nothing can collide.
-    BUILTIN_TOOL_NAMES = frozenset()
-
-    def __init__(self, config, system_prompt: Optional[str] = None):
+    def __init__(self, config: HarnessConfig, system_prompt: Optional[str] = None):
         super().__init__(config)
         self.system_prompt = system_prompt
         self._process: Optional[HarnessProcess] = None
@@ -119,14 +117,9 @@ class ClaudeCodeAdapter(AgenticHarnessAdapter):
         )
         tool_names: dict[str, str] = {}
         while True:
-            line = await self._process.read_line(
-                timeout_s=self.config.session_timeout_s
-            )
-            if line is None:  # EOF, or nothing for `session_timeout_s`
-                if self._process.is_running():
-                    raise HarnessTurnTimeoutError(
-                        f"Claude Code sent nothing for {self.config.session_timeout_s} s"
-                    )
+            # HarnessEnvironment bounds the whole turn with `session_timeout_s`.
+            line = await self._process.read_line()
+            if line is None:
                 raise HarnessError(
                     f"Claude Code exited mid-turn: {self._process.drain_stderr()}"
                 )
