@@ -36,11 +36,24 @@ def domain_tools(tau2: Tau2Environment) -> FastMCP:
     return mcp
 
 
+class Tau2Harness(HarnessEnvironment):
+    """A `HarnessEnvironment` that also closes the τ²-bench task it plays in."""
+
+    def __init__(self, tau2: Tau2Environment, **kwargs):
+        super().__init__(**kwargs)
+        self.tau2 = tau2
+
+    def close(self) -> None:
+        super().close()
+        self.tau2.close()
+
+
 def harness_for(
     tau2: Tau2Environment, policy: str, config: HarnessConfig
 ) -> HarnessEnvironment:
     """Claude Code with the domain's tools and policy, for one τ²-bench task."""
-    return HarnessEnvironment(
+    return Tau2Harness(
+        tau2,
         adapter=ClaudeCodeAdapter(config, system_prompt=AGENT_PROMPT + policy),
         mcp=domain_tools(tau2),
     )

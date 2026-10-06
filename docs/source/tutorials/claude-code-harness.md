@@ -78,6 +78,7 @@ while not tau2.state.done:
     message = without_end_tokens(tau2.act(turn.metadata["response"]))  # the customer replies
 
 harness.close()
+tau2.close()
 print(tau2.state.reward)
 ```
 

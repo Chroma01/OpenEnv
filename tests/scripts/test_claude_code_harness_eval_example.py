@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -104,6 +106,7 @@ def test_conversation_runs_through_the_adapter(tmp_path, customer):
 def test_claude_code_exiting_mid_turn_ends_the_conversation(tmp_path, customer):
     customer += ["crash"]
     tau2, observation, harness = start(tmp_path)
+    threads = threading.active_count()
     try:
         harness.reset()
         ((_, turn),) = converse(tau2, harness, observation.metadata["user_message"])
@@ -113,6 +116,12 @@ def test_claude_code_exiting_mid_turn_ends_the_conversation(tmp_path, customer):
     assert turn.done
     assert turn.metadata["error_type"] == "harness_crashed"
     assert "exited mid-turn" in turn.metadata["error"]
+    # Closing the harness also ends the unfinished τ²-bench conversation.
+    for _ in range(50):
+        if threading.active_count() < threads:
+            break
+        time.sleep(0.1)
+    assert threading.active_count() < threads
 
 
 def test_claude_code_going_quiet_is_a_timeout(tmp_path, customer):
