@@ -241,6 +241,14 @@ class Episode:
         }
 
 
+def parse_arguments(raw: str | None) -> dict | None:
+    """A tool call's arguments, or `None` when the model sent invalid JSON."""
+    try:
+        return json.loads(raw or "{}")
+    except ValueError:
+        return None
+
+
 def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Blocks]:
     """
     Build the UI's Gradio builder.
@@ -320,102 +328,117 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
             make_env(domain=domain, split=split, user_model=user_model, hf_token=token),
             task_id,
         )
-        yield (
-            timeline_html(episode.events, RUN_PLACEHOLDER),
-            episode.side(None, True),
-            runs,
-        )
-        schemas = [
-            {
-                "type": "function",
-                "function": {
-                    "name": n,
-                    "description": t.description,
-                    "parameters": t.input_schema,
-                },
-            }
-            for n, t in cat.tools.items()
-        ]
-        messages = [
-            {
-                "role": "system",
-                "content": episode.observation.metadata["policy"] + AGENT_INSTRUCTIONS,
-            },
-            {"role": "user", "content": episode.events[0]["text"]},
-        ]
-        for _ in range(MAX_AGENT_TURNS):
-            reply = (
-                litellm.completion(
-                    model=f"openai/{model}",
-                    api_base=HF_ROUTER,
-                    api_key=token,
-                    messages=messages,
-                    tools=schemas,
-                    temperature=0.0,
-                    num_retries=5,
-                )
-                .choices[0]
-                .message
+        try:
+            yield (
+                timeline_html(episode.events, RUN_PLACEHOLDER),
+                episode.side(None, True),
+                runs,
             )
-            if reply.tool_calls:
-                messages.append(reply.model_dump(exclude_none=True))
-                calls = [
-                    (c.id, c.function.name, json.loads(c.function.arguments or "{}"))
-                    for c in reply.tool_calls
-                ]
-            else:  # plain text is a message to the user
-                call_id = f"text{len(messages)}"
-                args = {"message": reply.content or ""}
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [
-                            {
-                                "id": call_id,
-                                "type": "function",
-                                "function": {
-                                    "name": "respond_to_user",
-                                    "arguments": json.dumps(args),
-                                },
-                            }
-                        ],
-                    }
-                )
-                calls = [(call_id, "respond_to_user", args)]
-            for call_id, name, args in calls:
-                observation, result = episode.act(name, args)
-                messages.append(
-                    {"role": "tool", "tool_call_id": call_id, "content": result}
-                )
-                if observation.done:
-                    run = episode.record(
-                        f"run-{len(runs) + 1}", model, cat, observation
+            schemas = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": n,
+                        "description": t.description,
+                        "parameters": t.input_schema,
+                    },
+                }
+                for n, t in cat.tools.items()
+            ]
+            messages = [
+                {
+                    "role": "system",
+                    "content": episode.observation.metadata["policy"]
+                    + AGENT_INSTRUCTIONS,
+                },
+                {"role": "user", "content": episode.events[0]["text"]},
+            ]
+            for _ in range(MAX_AGENT_TURNS):
+                reply = (
+                    litellm.completion(
+                        model=f"openai/{model}",
+                        api_base=HF_ROUTER,
+                        api_key=token,
+                        messages=messages,
+                        tools=schemas,
+                        temperature=0.0,
+                        num_retries=5,
+                        timeout=120,
                     )
+                    .choices[0]
+                    .message
+                )
+                if reply.tool_calls:
+                    messages.append(reply.model_dump(exclude_none=True))
+                    calls = [
+                        (c.id, c.function.name, parse_arguments(c.function.arguments))
+                        for c in reply.tool_calls
+                    ]
+                else:  # plain text is a message to the user
+                    call_id = f"text{len(messages)}"
+                    args = {"message": reply.content or ""}
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": call_id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": "respond_to_user",
+                                        "arguments": json.dumps(args),
+                                    },
+                                }
+                            ],
+                        }
+                    )
+                    calls = [(call_id, "respond_to_user", args)]
+                for call_id, name, args in calls:
+                    if args is None:
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": call_id,
+                                "content": "Error: the arguments are not valid JSON.",
+                            }
+                        )
+                        continue
+                    observation, result = episode.act(name, args)
+                    messages.append(
+                        {"role": "tool", "tool_call_id": call_id, "content": result}
+                    )
+                    if observation.done:
+                        run = episode.record(
+                            f"run-{len(runs) + 1}", model, cat, observation
+                        )
+                        yield (
+                            timeline_html(episode.events, RUN_PLACEHOLDER),
+                            episode.side(observation),
+                            runs + [run],
+                        )
+                        return
                     yield (
                         timeline_html(episode.events, RUN_PLACEHOLDER),
-                        episode.side(observation),
-                        runs + [run],
+                        episode.side(observation, running=True),
+                        runs,
                     )
-                    return
-                yield (
-                    timeline_html(episode.events, RUN_PLACEHOLDER),
-                    episode.side(observation, running=True),
-                    runs,
-                )
-        yield (
-            timeline_html(episode.events, RUN_PLACEHOLDER),
-            status_html(
-                f"Stopped after {MAX_AGENT_TURNS} agent turns · {episode.stats()}",
-                False,
-            ),
-            runs,
-        )
+            yield (
+                timeline_html(episode.events, RUN_PLACEHOLDER),
+                status_html(
+                    f"Stopped after {MAX_AGENT_TURNS} agent turns · {episode.stats()}",
+                    False,
+                ),
+                runs,
+            )
+        finally:  # also when Stop cancels the run
+            episode.env.close()
 
     # Play as the agent -------------------------------------------------------
     def play_start(
-        domain, split, user_model, task_id, oauth_token: gr.OAuthToken | None
+        previous, domain, split, user_model, task_id, oauth_token: gr.OAuthToken | None
     ):
+        close_episode(previous)
         token = hf_token(oauth_token)
         episode = Episode(
             make_env(domain=domain, split=split, user_model=user_model, hf_token=token),
@@ -426,6 +449,10 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
             timeline_html(episode.events, PLAY_PLACEHOLDER),
             episode.side(None),
         )
+
+    def close_episode(episode: Episode | None) -> None:
+        if episode is not None:
+            episode.env.close()
 
     def play_act(episode: Episode, name: str, arguments: dict):
         if episode is None or episode.env.state.done:
@@ -546,7 +573,7 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
                             run_side = gr.HTML("", **html)
 
                 with gr.Tab("Play as the agent", id="play"):
-                    episode = gr.State(None)
+                    episode = gr.State(None, delete_callback=close_episode)
                     with gr.Row(equal_height=False):
                         with gr.Column(scale=3):
                             play_view = gr.HTML(
@@ -662,7 +689,7 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
 
             play_go.click(
                 play_start,
-                [domain, split, user_model, play_task],
+                [episode, domain, split, user_model, play_task],
                 [episode, play_view, play_side],
             )
             play_task.change(

@@ -307,6 +307,7 @@ class Tau2Environment(MCPEnvironment):
             self._gym._agent.set_action(
                 AssistantMessage(role="assistant", content=GymAgent.STOP_TOKEN)
             )
+            self._gym = None
 
     def close(self) -> None:
         self._end_conversation()

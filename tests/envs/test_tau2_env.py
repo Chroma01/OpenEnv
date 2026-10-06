@@ -195,6 +195,7 @@ def test_reset_ends_the_previous_conversation(env, scripted_user):
     env.reset(task_id="2")
     env.reset(task_id="2")
     env.close()
+    env.close()  # closing twice is fine
     for _ in range(50):
         if threading.active_count() < before:
             break
