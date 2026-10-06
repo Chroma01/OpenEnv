@@ -438,12 +438,12 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
     def play_start(
         previous, domain, split, user_model, task_id, oauth_token: gr.OAuthToken | None
     ):
-        close_episode(previous)
         token = hf_token(oauth_token)
         episode = Episode(
             make_env(domain=domain, split=split, user_model=user_model, hf_token=token),
             task_id,
         )
+        close_episode(previous)  # only once the new one has started
         return (
             episode,
             timeline_html(episode.events, PLAY_PLACEHOLDER),
