@@ -22,7 +22,6 @@ from fastapi import Request
 from fastapi.responses import RedirectResponse
 from openenv.core.env_server.http_server import create_app
 from openenv.core.env_server.mcp_types import CallToolAction, CallToolObservation
-from openenv.core.env_server.types import Observation
 from pydantic import field_validator
 
 from .gradio_ui import build_ui
@@ -60,7 +59,6 @@ app = create_app(
     _env_factory,
     Tau2CallToolAction,
     CallToolObservation,
-    reset_observation_cls=Observation,
     env_name="tau2_env",
     max_concurrent_envs=int(os.environ.get("MAX_CONCURRENT_ENVS", "8")),
     gradio_builder=build_ui(_env_factory),
