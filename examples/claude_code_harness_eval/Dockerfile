@@ -20,7 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends git \
 
 COPY envs/tau2_env /app/tau2_env
 WORKDIR /app/tau2_env
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-editable
+# tau2_env's version rarely changes, so reinstall it rather than reuse a cached wheel of older code.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-editable --reinstall-package openenv-tau2-env
 
 # τ²-bench's tasks, databases and policies, at the commit tau2_env pins.
 RUN git clone --filter=blob:none --no-checkout https://github.com/sierra-research/tau2-bench /opt/tau2-bench \
