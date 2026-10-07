@@ -29,7 +29,7 @@ import litellm
 import tau2.utils.llm_utils as llm_utils
 from openenv.core.harness import HarnessAction, HarnessConfig
 from tau2_env.server.tau2_environment import Tau2Environment
-from tau2_harness import AGENT_PROMPT, converse, harness_for
+from tau2_harness import AGENT_PROMPT, Tau2Harness
 
 FAKE_CLAUDE = Path(__file__).parent / "fake_claude_code.py"
 
@@ -51,9 +51,8 @@ def customer(monkeypatch):
     return replies
 
 
-def start(tmp_path: Path, session_timeout_s: float = 30.0):
+def start(tmp_path: Path, session_timeout_s: float = 30.0, **kwargs):
     tau2 = Tau2Environment(domain="airline", split="test")
-    observation = tau2.reset(task_id="2")
     config = HarnessConfig(
         name="claude-code",
         command=[sys.executable, "-u", str(FAKE_CLAUDE)],
@@ -62,8 +61,7 @@ def start(tmp_path: Path, session_timeout_s: float = 30.0):
         model="haiku",
         session_timeout_s=session_timeout_s,
     )
-    harness = harness_for(tau2, observation.metadata["policy"], config)
-    return tau2, observation, harness
+    return tau2, Tau2Harness(tau2, "2", config, **kwargs)
 
 
 def test_conversation_runs_through_the_adapter(tmp_path, customer):
@@ -71,19 +69,19 @@ def test_conversation_runs_through_the_adapter(tmp_path, customer):
         "Hi, my user id is noah_muller_9847.",
         "That's all, thanks. ###STOP###",
     ]
-    tau2, observation, harness = start(tmp_path)
+    tau2, harness = start(tmp_path)
     try:
-        injected = harness.reset().metadata["injected_tools"]
-        turns = list(converse(tau2, harness, observation.metadata["user_message"]))
+        opening = harness.reset()
+        turn = harness.step(HarnessAction(message=opening.metadata["customer"]))
     finally:
         harness.close()
 
     # Only the domain's tools reach Claude Code; it talks to the customer through its replies.
+    injected = opening.metadata["injected_tools"]
     assert "get_user_details" in injected
     assert "respond_to_user" not in injected and "done" not in injected
 
-    (message, turn), (last_message, last_turn) = turns
-    assert message == "Hi, my user id is noah_muller_9847."
+    assert opening.metadata["customer"] == "Hi, my user id is noah_muller_9847."
     call, result = turn.metadata["turn_events"][:2]
     assert call["data"] == {
         "tool_name": "get_user_details",
@@ -91,9 +89,11 @@ def test_conversation_runs_through_the_adapter(tmp_path, customer):
     }
     assert '"user_id": "noah_muller_9847"' in result["data"]["result"]
 
-    # Claude Code's reply went to the customer, who ended the conversation.
-    assert last_message == "That's all, thanks." and last_turn is None
-    assert tau2.state.done
+    # Claude Code's reply went to the customer, who ended the conversation, and the
+    # rubric put τ²-bench's score in the observation.
+    assert turn.metadata["customer"] == "That's all, thanks."
+    assert turn.done and tau2.state.done
+    assert turn.reward == tau2.state.reward == 1.0
     assert tau2.state.reward_info["reward_basis"] == ["DB", "COMMUNICATE"]
 
     argv = json.loads((tmp_path / "argv.json").read_text())
@@ -103,13 +103,30 @@ def test_conversation_runs_through_the_adapter(tmp_path, customer):
     assert "--strict-mcp-config" in argv
 
 
+def test_without_the_simulated_customer_turns_return_claude_code_reply(
+    tmp_path, customer
+):
+    """Production mode: a person is the customer, so turns stop at Claude Code."""
+    customer += ["Hi, my user id is noah_muller_9847."]
+    tau2, harness = start(tmp_path, simulated_customer=False)
+    try:
+        opening = harness.reset()
+        turn = harness.step(HarnessAction(message="What reservations do I have?"))
+    finally:
+        harness.close()
+
+    assert "customer" not in opening.metadata and "customer" not in turn.metadata
+    assert turn.metadata["response"].startswith("get_user_details said")
+    assert not turn.done and turn.reward == 0.0
+
+
 def test_claude_code_exiting_mid_turn_ends_the_conversation(tmp_path, customer):
     customer += ["crash"]
-    tau2, observation, harness = start(tmp_path)
+    tau2, harness = start(tmp_path)
     threads = threading.active_count()
     try:
-        harness.reset()
-        ((_, turn),) = converse(tau2, harness, observation.metadata["user_message"])
+        opening = harness.reset()
+        turn = harness.step(HarnessAction(message=opening.metadata["customer"]))
     finally:
         harness.close()
 
@@ -126,7 +143,7 @@ def test_claude_code_exiting_mid_turn_ends_the_conversation(tmp_path, customer):
 
 def test_claude_code_going_quiet_is_a_timeout(tmp_path, customer):
     customer += ["Hi, my user id is noah_muller_9847."]
-    tau2, _, harness = start(tmp_path, session_timeout_s=1.0)
+    _, harness = start(tmp_path, session_timeout_s=1.0)
     try:
         harness.reset()
         turn = harness.step(HarnessAction(message="stall"))

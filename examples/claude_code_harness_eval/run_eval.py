@@ -20,16 +20,12 @@ from __future__ import annotations
 import argparse
 import tempfile
 
-from openenv.core.harness import HarnessConfig
+from openenv.core.harness import HarnessAction, HarnessConfig
 from tau2_env.server.tau2_environment import Tau2Environment
-from tau2_harness import converse, harness_for
+from tau2_harness import Tau2Harness
 
 
 def run_task(task_id: str, args: argparse.Namespace) -> float:
-    tau2 = Tau2Environment(
-        domain=args.domain, split=args.split, user_model=args.user_model
-    )
-    observation = tau2.reset(task_id=task_id)
     config = HarnessConfig(
         name="claude-code",
         command=[args.claude],
@@ -38,28 +34,31 @@ def run_task(task_id: str, args: argparse.Namespace) -> float:
         model=args.model,
         session_timeout_s=args.turn_timeout,
     )
-    harness = harness_for(tau2, observation.metadata["policy"], config)
+    tau2 = Tau2Environment(
+        domain=args.domain, split=args.split, user_model=args.user_model
+    )
+    harness = Tau2Harness(tau2, task_id, config)
     print(f"\n=== {args.domain} task {task_id}")
     try:
-        harness.reset()
-        for message, turn in converse(
-            tau2, harness, observation.metadata["user_message"]
-        ):
-            print(f"customer: {message}")
-            if turn is None:
-                continue
-            for event in turn.metadata.get("turn_events", []):
+        observation = harness.reset()
+        while not observation.done:
+            print(f"customer: {observation.metadata['customer']}")
+            observation = harness.step(
+                HarnessAction(message=observation.metadata["customer"])
+            )
+            for event in observation.metadata.get("turn_events", []):
                 if event["type"] == "tool_call":
                     call = event["data"]
                     print(f"  -> {call['tool_name']}({call['arguments']})")
-            print(
-                f"agent: {turn.metadata.get('response') or turn.metadata.get('error', '')}"
-            )
+            agent = observation.metadata.get("response")
+            print(f"agent: {agent or observation.metadata.get('error', '')}")
+        if observation.metadata.get("customer"):  # the customer's last words
+            print(f"customer: {observation.metadata['customer']}")
     finally:
         harness.close()
     breakdown = tau2.state.reward_info.get("reward_breakdown", {})
-    print(f"reward: {tau2.state.reward:.2f} {breakdown}")
-    return tau2.state.reward if tau2.state.done else 0.0
+    print(f"reward: {observation.reward:.2f} {breakdown}")
+    return observation.reward
 
 
 def main() -> None:

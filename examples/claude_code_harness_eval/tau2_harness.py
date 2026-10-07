@@ -2,18 +2,23 @@
 
 """Claude Code as the agent of a τ²-bench conversation, through `HarnessEnvironment`.
 
-`tau2_env` holds the task: the simulated customer, the domain's database and its
-tools. `HarnessEnvironment` holds Claude Code, with the domain's tools injected
-over MCP. Each customer message is one `step()`, Claude Code's reply goes back to
-the simulated customer, and τ²-bench scores the conversation when the customer
-is done.
+`Tau2Harness` runs Claude Code with the domain's tools injected over MCP, and plays
+the τ²-bench task around it: each `step()` sends the customer's message to Claude
+Code, passes its reply back to τ²-bench's simulated customer, and returns the
+customer's next message. A rubric reads τ²-bench's score when the customer ends
+the conversation, so the reward is in `observation.reward`.
 """
 
 from __future__ import annotations
 
+import asyncio
+from typing import Any, Optional
+
 from claude_code_adapter import ClaudeCodeAdapter
 from fastmcp import FastMCP
+from openenv.core.env_server.types import Observation
 from openenv.core.harness import HarnessAction, HarnessConfig, HarnessEnvironment
+from openenv.core.rubrics import Rubric
 from openenv.core.utils import run_async_safely
 from tau2_env.server.tau2_environment import Tau2Environment, without_end_tokens
 
@@ -36,50 +41,76 @@ def domain_tools(tau2: Tau2Environment) -> FastMCP:
     return mcp
 
 
-class Tau2Harness(HarnessEnvironment):
-    """A `HarnessEnvironment` that also closes the τ²-bench task it plays in."""
+class Tau2Score(Rubric):
+    """τ²-bench's own score, once the customer has ended the conversation."""
 
-    def __init__(self, tau2: Tau2Environment, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, tau2: Tau2Environment):
+        super().__init__()
         self.tau2 = tau2
+
+    def forward(self, action: Any, observation: Observation) -> float:
+        return self.tau2.state.reward if self.tau2.state.done else 0.0
+
+
+class Tau2Harness(HarnessEnvironment):
+    """
+    Claude Code as the agent of one τ²-bench task.
+
+    Args:
+        tau2 (`Tau2Environment`):
+            The τ²-bench environment. It is reset to `task_id` here, and closed with
+            the harness.
+        task_id (`str`):
+            The τ²-bench task to play.
+        config (`HarnessConfig`):
+            How to launch Claude Code.
+        simulated_customer (`bool`, *optional*, defaults to `True`):
+            Whether τ²-bench's simulated customer answers each turn. Set it to
+            `False` when a person plays the customer, as in production mode.
+    """
+
+    def __init__(
+        self,
+        tau2: Tau2Environment,
+        task_id: str,
+        config: HarnessConfig,
+        simulated_customer: bool = True,
+    ):
+        task = tau2.reset(task_id=task_id).metadata
+        super().__init__(
+            adapter=ClaudeCodeAdapter(
+                config, system_prompt=AGENT_PROMPT + task["policy"]
+            ),
+            mcp=domain_tools(tau2),
+            rubric=Tau2Score(tau2),
+        )
+        self.tau2 = tau2
+        self.simulated_customer = simulated_customer
+        self.opening_message = task["user_message"]
+
+    async def reset_async(
+        self, seed: Optional[int] = None, episode_id: Optional[str] = None, **kwargs
+    ) -> Observation:
+        observation = await super().reset_async(seed, episode_id, **kwargs)
+        if self.simulated_customer:
+            observation.metadata["customer"] = self.opening_message
+        return observation
+
+    # Every turn, sync or async, goes through `_run_turn`, which scores it before
+    # returning. The customer answers after Claude Code, so score again after that.
+    async def _run_turn(
+        self, action: HarnessAction, timeout_s: Optional[float] = None
+    ) -> Observation:
+        observation = await super()._run_turn(action, timeout_s=timeout_s)
+        if not self.simulated_customer or observation.done:  # e.g. Claude Code crashed
+            return observation
+        reply = observation.metadata["response"] or "(no reply)"
+        customer = await asyncio.to_thread(self.tau2.act, reply)
+        observation.metadata["customer"] = without_end_tokens(customer)
+        observation.done = self.tau2.state.done
+        observation.reward = await self._apply_rubric_async(action, observation)
+        return observation
 
     def close(self) -> None:
         super().close()
         self.tau2.close()
-
-
-def harness_for(
-    tau2: Tau2Environment, policy: str, config: HarnessConfig
-) -> HarnessEnvironment:
-    """Claude Code with the domain's tools and policy, for one τ²-bench task."""
-    return Tau2Harness(
-        tau2,
-        adapter=ClaudeCodeAdapter(config, system_prompt=AGENT_PROMPT + policy),
-        mcp=domain_tools(tau2),
-    )
-
-
-def converse(
-    tau2: Tau2Environment,
-    harness: HarnessEnvironment,
-    first_message: str,
-    max_turns: int = 30,
-):
-    """
-    Run the conversation until the customer is done.
-
-    Yields `(customer_message, observation)` for each turn, where the observation
-    holds Claude Code's reply and the turn's events.
-    """
-    message = first_message
-    for _ in range(max_turns):
-        observation = harness.step(HarnessAction(message=message))
-        yield message, observation
-        if observation.done:  # Claude Code crashed or timed out
-            return
-        reply = observation.metadata.get("response") or "(no reply)"
-        message = without_end_tokens(tau2.act(reply))
-        if tau2.state.done:
-            if message:
-                yield message, None
-            return

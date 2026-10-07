@@ -12,8 +12,8 @@ The full code is in [`examples/claude_code_harness_eval`](https://github.com/hug
 ## What You'll Build
 
 - An `AgenticHarnessAdapter` for Claude Code's headless mode.
-- A `HarnessEnvironment` that gives Claude Code the tools and policy of a τ²-bench domain.
-- An evaluation loop where τ²-bench's simulated customer talks to Claude Code until it is done, and τ²-bench scores the conversation.
+- A `HarnessEnvironment` that gives Claude Code the tools and policy of a τ²-bench task, plays the task's simulated customer between turns, and scores the conversation with a rubric.
+- The RFC 005 loop around it: one `step()` per customer message, until the customer is done.
 - The same harness served in production mode, with you as the customer.
 
 ## Install Dependencies
@@ -40,49 +40,37 @@ Claude Code's own tools are turned off (`--tools ""`), so the agent can only act
 
 ## Join It to τ²-bench
 
-[`tau2_harness.py`](https://github.com/huggingface/OpenEnv/blob/main/examples/claude_code_harness_eval/tau2_harness.py) joins two environments:
+[`tau2_harness.py`](https://github.com/huggingface/OpenEnv/blob/main/examples/claude_code_harness_eval/tau2_harness.py) defines `Tau2Harness`, a `HarnessEnvironment` for one τ²-bench task:
 
-- `tau2_env` holds the task: the simulated customer, the domain's database and its tools.
-- `HarnessEnvironment` holds Claude Code. It gets the domain's tools and the domain's policy, appended to its system prompt. It does not get `respond_to_user` or `done`, because Claude Code talks to the customer through its replies.
+- **The tools and the policy.** Claude Code gets the domain's tools over MCP, and the domain's policy appended to its system prompt. It does not get `respond_to_user` or `done`, because it talks to the customer through its replies.
+- **The customer.** After each Claude Code turn, the environment passes the reply to τ²-bench's simulated customer and returns the customer's next message in `observation.metadata["customer"]`. The customer is part of the environment, as in `tau2_env` itself.
+- **The reward.** A rubric reads τ²-bench's score when the customer ends the conversation, so the reward is in `observation.reward` and `observation.done` marks the end.
 
 ```python
 import tempfile
 
-from claude_code_adapter import ClaudeCodeAdapter
-from openenv.core.harness import HarnessAction, HarnessConfig, HarnessEnvironment
-from tau2_env.server.tau2_environment import Tau2Environment, without_end_tokens
-from tau2_harness import AGENT_PROMPT, domain_tools
+from openenv.core.harness import HarnessAction, HarnessConfig
+from tau2_env.server.tau2_environment import Tau2Environment
+from tau2_harness import Tau2Harness
 
-tau2 = Tau2Environment(domain="airline", split="test")
-observation = tau2.reset(task_id="2")
-
-harness = HarnessEnvironment(
-    adapter=ClaudeCodeAdapter(
-        HarnessConfig(
-            name="claude-code",
-            command=["claude"],
-            working_directory=tempfile.mkdtemp(),
-            model="haiku",
-        ),
-        system_prompt=AGENT_PROMPT + observation.metadata["policy"],
-    ),
-    mcp=domain_tools(tau2),  # the domain's tools as a FastMCP server
+config = HarnessConfig(
+    name="claude-code",
+    command=["claude"],
+    working_directory=tempfile.mkdtemp(),
+    model="haiku",
 )
-harness.reset()
+harness = Tau2Harness(Tau2Environment(domain="airline", split="test"), "2", config)
 
-message = observation.metadata["user_message"]
-while not tau2.state.done:
-    turn = harness.step(HarnessAction(message=message))  # one Claude Code turn
-    if turn.done:  # Claude Code exited or ran out of time
-        break
-    message = without_end_tokens(tau2.act(turn.metadata["response"]))  # the customer replies
+observation = harness.reset()  # the customer's opening message
+while not observation.done:
+    # One Claude Code turn, then the customer's answer
+    observation = harness.step(HarnessAction(message=observation.metadata["customer"]))
 
-harness.close()
-tau2.close()
-print(tau2.state.reward)
+print(observation.reward)
+harness.close()  # stops Claude Code and the τ²-bench task
 ```
 
-Each customer message is one `step(HarnessAction(message=...))`, and Claude Code keeps the conversation's context across steps. Its tool calls run against the same database the customer sees, so τ²-bench can score the result.
+Each customer message is one `step(HarnessAction(message=...))`, and Claude Code keeps the conversation's context across steps. Its tool calls run against the same database the customer sees, so τ²-bench can score the result. If Claude Code exits or runs out of time, the step comes back with `done` and the error in its metadata.
 
 ## Run the Evaluation
 
@@ -111,7 +99,7 @@ The first airline test tasks are a gentle start. Tasks 2 and 6 only look things 
 
 ## Serve It in Production Mode
 
-The same harness can be served over the `WS /harness` route ([production mode](../guides/simulation-vs-production)). The server takes one connection at a time, each with a fresh Claude Code process and a fresh copy of the task's database, and `/reset` and `/step` are not exposed. Here you play the customer, so nothing is scored:
+The same harness can be served over the `WS /harness` route ([production mode](../guides/simulation-vs-production)). The server takes one connection at a time, each with a fresh Claude Code process and a fresh copy of the task's database, and `/reset` and `/step` are not exposed. Here you play the customer, so `serve.py` builds `Tau2Harness(..., simulated_customer=False)` and nothing is scored:
 
 ```bash
 PYTHONPATH=src:envs:examples/claude_code_harness_eval \

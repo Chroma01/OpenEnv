@@ -26,7 +26,7 @@ from openenv.core.env_server.http_server import create_fastapi_app
 from openenv.core.env_server.types import Observation
 from openenv.core.harness import HarnessAction, HarnessConfig, HarnessEnvironment
 from tau2_env.server.tau2_environment import Tau2Environment
-from tau2_harness import harness_for
+from tau2_harness import Tau2Harness
 
 
 def main() -> None:
@@ -46,15 +46,15 @@ def main() -> None:
     args = parser.parse_args()
 
     def make_env() -> HarnessEnvironment:
-        tau2 = Tau2Environment(domain=args.domain, split="base")
-        observation = tau2.reset(task_id=args.task_id)
         config = HarnessConfig(
             name="claude-code",
             command=[args.claude],
             working_directory=tempfile.mkdtemp(prefix="claude-code-serve-"),
             model=args.model,
         )
-        return harness_for(tau2, observation.metadata["policy"], config)
+        # You are the customer, so τ²-bench's simulated one stays out of the turns.
+        tau2 = Tau2Environment(domain=args.domain, split="base")
+        return Tau2Harness(tau2, args.task_id, config, simulated_customer=False)
 
     app = create_fastapi_app(make_env, HarnessAction, Observation, mode="production")
     uvicorn.run(app, host=args.host, port=args.port)
