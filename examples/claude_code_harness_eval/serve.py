@@ -8,12 +8,12 @@
 
 The server takes one connection at a time, each with a fresh copy of the task's
 database and its own Claude Code process. You play the customer, so nothing is
-scored; `/reset` and `/step` are not exposed.
+scored. It has no authentication, and every connection spends your credentials, so
+keep it on localhost or behind your own auth.
 
 `tau2_env` loads a task's database and policy in `reset()`, which also opens the
 conversation with its simulated customer. That message is not used here, but it
-needs `HF_TOKEN`, and it costs one customer call per connection plus one when the
-server starts (`create_fastapi_app` builds the environment once to check it).
+needs `HF_TOKEN` and costs one customer call per connection.
 """
 
 from __future__ import annotations
@@ -52,9 +52,8 @@ def main() -> None:
             working_directory=tempfile.mkdtemp(prefix="claude-code-serve-"),
             model=args.model,
         )
-        # You are the customer, so τ²-bench's simulated one stays out of the turns.
         tau2 = Tau2Environment(domain=args.domain, split="base")
-        return Tau2Harness(tau2, args.task_id, config, simulated_customer=False)
+        return Tau2Harness(tau2, args.task_id, config)
 
     app = create_fastapi_app(make_env, HarnessAction, Observation, mode="production")
     uvicorn.run(app, host=args.host, port=args.port)

@@ -19,6 +19,7 @@ It is an evaluation recipe. RFC 005 does not capture token ids, so this is not a
 You need:
 
 - the `claude` CLI, logged in or with `ANTHROPIC_API_KEY` set;
+- Python 3.12 or later, which τ²-bench requires;
 - `tau2_env` installed (`pip install -e envs/tau2_env`) and `TAU2_DATA_DIR` set, see [its README](../../envs/tau2_env/README.md#running-the-server);
 - `HF_TOKEN`, because the simulated customer runs on [Inference Providers](https://huggingface.co/docs/inference-providers).
 
@@ -50,6 +51,6 @@ python examples/claude_code_harness_eval/chat.py ws://localhost:8000/harness \
     "Hi, I'm Noah Muller, user id noah_muller_9847. What reservations do I have?"
 ```
 
-To serve it for others, run it in the container instead: the [`Dockerfile`](Dockerfile) puts Claude Code, `tau2_env` and `serve.py` in one image, as the tutorial describes.
+The [`Dockerfile`](Dockerfile) puts Claude Code, `tau2_env` and `serve.py` in one image, as the tutorial describes. The server has no authentication, so keep it on localhost or behind your own auth.
 
 [`tests/scripts/test_claude_code_harness_eval_example.py`](../../tests/scripts/test_claude_code_harness_eval_example.py) covers the adapter offline: a fake `claude` replays the same stream-json events and calls the environment's tools over the real bridge.

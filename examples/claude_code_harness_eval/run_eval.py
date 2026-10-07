@@ -19,13 +19,15 @@ from __future__ import annotations
 
 import argparse
 import tempfile
+from typing import Optional
 
 from openenv.core.harness import HarnessAction, HarnessConfig
 from tau2_env.server.tau2_environment import Tau2Environment
 from tau2_harness import Tau2Harness
 
 
-def run_task(task_id: str, args: argparse.Namespace) -> float:
+def run_task(task_id: str, args: argparse.Namespace) -> Optional[float]:
+    """Play one task. Returns its reward, or `None` if Claude Code failed."""
     config = HarnessConfig(
         name="claude-code",
         command=[args.claude],
@@ -56,6 +58,9 @@ def run_task(task_id: str, args: argparse.Namespace) -> float:
             print(f"customer: {observation.metadata['customer']}")
     finally:
         harness.close()
+    if "error_type" in observation.metadata:
+        print(f"error: {observation.metadata['error_type']}")
+        return None
     breakdown = tau2.state.reward_info.get("reward_breakdown", {})
     print(f"reward: {observation.reward:.2f} {breakdown}")
     return observation.reward
@@ -86,13 +91,13 @@ def main() -> None:
         or Tau2Environment(domain=args.domain, split=args.split).task_ids[: args.tasks]
     )
     rewards = {task_id: run_task(task_id, args) for task_id in task_ids}
-    print(
-        "\n"
-        + "\n".join(
-            f"{'PASS' if r >= 1.0 else 'FAIL'}  task {t}" for t, r in rewards.items()
-        )
-    )
-    print(f"pass^1: {sum(r >= 1.0 for r in rewards.values())}/{len(rewards)}")
+    print()
+    for task_id, reward in rewards.items():
+        status = "ERROR" if reward is None else "PASS" if reward >= 1.0 else "FAIL"
+        print(f"{status}  task {task_id}")
+    # Tasks where Claude Code failed are left out: they measure the API, not the agent.
+    scored = [r for r in rewards.values() if r is not None]
+    print(f"pass^1: {sum(r >= 1.0 for r in scored)}/{len(scored)}")
 
 
 if __name__ == "__main__":

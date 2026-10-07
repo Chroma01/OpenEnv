@@ -9,7 +9,8 @@ passed in `--mcp-config`:
 
 - every message makes it look the customer up with `get_user_details`;
 - a message containing "crash" makes the process exit mid-turn;
-- a message containing "stall" makes it go quiet without exiting.
+- a message containing "stall" makes it go quiet without exiting;
+- a message containing "api error" makes it end the turn with an error result.
 
 `$FAKE_CLAUDE_ARGV` names a file where the command line is written, so the
 test can check the flags the adapter passed.
@@ -35,6 +36,12 @@ async def run_turn(message: str, url: str) -> None:
         sys.exit(3)
     if "stall" in message:
         await asyncio.sleep(60)
+    if "api error" in message:
+        error = "API Error: Connection dropped (ECONNRESET)"
+        emit(
+            {"type": "result", "subtype": "success", "is_error": True, "result": error}
+        )
+        return
     name, arguments = "get_user_details", {"user_id": "noah_muller_9847"}
     emit(
         {

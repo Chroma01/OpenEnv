@@ -7,6 +7,9 @@ the τ²-bench task around it: each `step()` sends the customer's message to Cla
 Code, passes its reply back to τ²-bench's simulated customer, and returns the
 customer's next message. A rubric reads τ²-bench's score when the customer ends
 the conversation, so the reward is in `observation.reward`.
+
+In production mode (`WS /harness`), messages go straight to Claude Code, so a person
+plays the customer and nothing is scored.
 """
 
 from __future__ import annotations
@@ -58,42 +61,31 @@ class Tau2Harness(HarnessEnvironment):
 
     Args:
         tau2 (`Tau2Environment`):
-            The τ²-bench environment. It is reset to `task_id` here, and closed with
-            the harness.
+            The τ²-bench environment. Each `reset()` starts the task on it, and it is
+            closed with the harness.
         task_id (`str`):
             The τ²-bench task to play.
         config (`HarnessConfig`):
             How to launch Claude Code.
-        simulated_customer (`bool`, *optional*, defaults to `True`):
-            Whether τ²-bench's simulated customer answers each turn. Set it to
-            `False` when a person plays the customer, as in production mode.
     """
 
-    def __init__(
-        self,
-        tau2: Tau2Environment,
-        task_id: str,
-        config: HarnessConfig,
-        simulated_customer: bool = True,
-    ):
-        task = tau2.reset(task_id=task_id).metadata
+    def __init__(self, tau2: Tau2Environment, task_id: str, config: HarnessConfig):
         super().__init__(
-            adapter=ClaudeCodeAdapter(
-                config, system_prompt=AGENT_PROMPT + task["policy"]
-            ),
+            adapter=ClaudeCodeAdapter(config),
             mcp=domain_tools(tau2),
             rubric=Tau2Score(tau2),
         )
         self.tau2 = tau2
-        self.simulated_customer = simulated_customer
-        self.opening_message = task["user_message"]
+        self.task_id = task_id
 
     async def reset_async(
         self, seed: Optional[int] = None, episode_id: Optional[str] = None, **kwargs
     ) -> Observation:
+        # A fresh copy of the task's database, and the customer's opening message.
+        task = (await asyncio.to_thread(self.tau2.reset, task_id=self.task_id)).metadata
+        self.adapter.system_prompt = AGENT_PROMPT + task["policy"]
         observation = await super().reset_async(seed, episode_id, **kwargs)
-        if self.simulated_customer:
-            observation.metadata["customer"] = self.opening_message
+        observation.metadata["customer"] = task["user_message"]
         return observation
 
     # Every turn, sync or async, goes through `_run_turn`, which scores it before
@@ -102,7 +94,7 @@ class Tau2Harness(HarnessEnvironment):
         self, action: HarnessAction, timeout_s: Optional[float] = None
     ) -> Observation:
         observation = await super()._run_turn(action, timeout_s=timeout_s)
-        if not self.simulated_customer or observation.done:  # e.g. Claude Code crashed
+        if observation.done:  # e.g. Claude Code crashed
             return observation
         reply = observation.metadata["response"] or "(no reply)"
         customer = await asyncio.to_thread(self.tau2.act, reply)

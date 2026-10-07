@@ -27,6 +27,9 @@ sys.path.insert(0, str(_REPO_ROOT / "examples" / "claude_code_harness_eval"))
 
 import litellm
 import tau2.utils.llm_utils as llm_utils
+from fastapi.testclient import TestClient
+from openenv.core.env_server.http_server import create_fastapi_app
+from openenv.core.env_server.types import Observation
 from openenv.core.harness import HarnessAction, HarnessConfig
 from tau2_env.server.tau2_environment import Tau2Environment
 from tau2_harness import AGENT_PROMPT, Tau2Harness
@@ -51,7 +54,7 @@ def customer(monkeypatch):
     return replies
 
 
-def start(tmp_path: Path, session_timeout_s: float = 30.0, **kwargs):
+def start(tmp_path: Path, session_timeout_s: float = 30.0):
     tau2 = Tau2Environment(domain="airline", split="test")
     config = HarnessConfig(
         name="claude-code",
@@ -61,7 +64,7 @@ def start(tmp_path: Path, session_timeout_s: float = 30.0, **kwargs):
         model="haiku",
         session_timeout_s=session_timeout_s,
     )
-    return tau2, Tau2Harness(tau2, "2", config, **kwargs)
+    return tau2, Tau2Harness(tau2, "2", config)
 
 
 def test_conversation_runs_through_the_adapter(tmp_path, customer):
@@ -100,32 +103,65 @@ def test_conversation_runs_through_the_adapter(tmp_path, customer):
     assert argv[argv.index("--tools") + 1] == ""
     assert argv[argv.index("--allowedTools") + 1] == "mcp__env"
     assert argv[argv.index("--append-system-prompt") + 1].startswith(AGENT_PROMPT)
+    assert argv[argv.index("--setting-sources") + 1] == ""
     assert "--strict-mcp-config" in argv
 
 
-def test_without_the_simulated_customer_turns_return_claude_code_reply(
-    tmp_path, customer
-):
-    """Production mode: a person is the customer, so turns stop at Claude Code."""
-    customer += ["Hi, my user id is noah_muller_9847."]
-    tau2, harness = start(tmp_path, simulated_customer=False)
+def test_each_reset_starts_the_task_again(tmp_path, customer):
+    customer += [
+        "Hi, my user id is noah_muller_9847.",
+        "That's all, thanks. ###STOP###",
+        "Hi again, my user id is noah_muller_9847.",
+    ]
+    tau2, harness = start(tmp_path)
     try:
         opening = harness.reset()
-        turn = harness.step(HarnessAction(message="What reservations do I have?"))
+        harness.step(HarnessAction(message=opening.metadata["customer"]))
+        assert tau2.state.done
+        again = harness.reset()
     finally:
         harness.close()
 
-    assert "customer" not in opening.metadata and "customer" not in turn.metadata
-    assert turn.metadata["response"].startswith("get_user_details said")
-    assert not turn.done and turn.reward == 0.0
+    assert again.metadata["customer"] == "Hi again, my user id is noah_muller_9847."
+    assert not tau2.state.done
+
+
+def test_production_mode_talks_to_claude_code(tmp_path, customer):
+    """`WS /harness`, as `serve.py` serves it: a person is the customer, nothing is scored."""
+    customer += ["Hi, my user id is noah_muller_9847."]  # tau2's reset() opens with it
+    app = create_fastapi_app(
+        lambda: start(tmp_path)[1], HarnessAction, Observation, mode="production"
+    )
+    with TestClient(app).websocket_connect("/harness") as websocket:
+        assert websocket.receive_json()["type"] == "session_started"
+        websocket.send_json({"type": "message", "content": "What do I have booked?"})
+        while (frame := websocket.receive_json())["type"] != "turn_complete":
+            pass
+
+    assert frame["data"]["response"].startswith("get_user_details said")
+    assert not customer  # the customer only opened the conversation
+
+
+def test_an_api_error_ends_the_turn_as_a_harness_failure(tmp_path, customer):
+    customer += ["api error"]
+    tau2, harness = start(tmp_path)
+    try:
+        opening = harness.reset()
+        turn = harness.step(HarnessAction(message=opening.metadata["customer"]))
+    finally:
+        harness.close()
+
+    assert turn.done and not tau2.state.done
+    assert turn.metadata["error_type"] == "harness_crashed"
+    assert "ECONNRESET" in turn.metadata["error"]
 
 
 def test_claude_code_exiting_mid_turn_ends_the_conversation(tmp_path, customer):
     customer += ["crash"]
     tau2, harness = start(tmp_path)
-    threads = threading.active_count()
     try:
-        opening = harness.reset()
+        opening = harness.reset()  # starts τ²-bench's conversation thread
+        threads = threading.active_count()
         turn = harness.step(HarnessAction(message=opening.metadata["customer"]))
     finally:
         harness.close()

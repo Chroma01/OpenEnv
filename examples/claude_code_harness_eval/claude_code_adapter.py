@@ -9,7 +9,8 @@ Claude Code answers with JSON-line events on stdout, ending every turn with a
 pointing at the `HarnessMCPBridge` URL.
 
 Claude Code's own tools are disabled (`--tools ""`), so the agent can only act
-through the environment's tools. That keeps the example safe to run on a laptop.
+through the environment's tools, and it loads no settings files
+(`--setting-sources ""`), so the user's hooks and CLAUDE.md stay out of the run.
 """
 
 from __future__ import annotations
@@ -21,11 +22,11 @@ from openenv.core.env_server.mcp_types import Tool
 from openenv.core.harness import (
     AgenticHarnessAdapter,
     HarnessConfig,
+    HarnessError,
     HarnessEvent,
     HarnessEventType,
     HarnessProcess,
 )
-from openenv.core.harness.adapter import HarnessError
 
 MCP_SERVER_NAME = "env"
 # Claude Code exposes MCP tools as `mcp__<server>__<tool>`.
@@ -77,6 +78,8 @@ class ClaudeCodeAdapter(AgenticHarnessAdapter):
             "--tools",
             "",
             "--strict-mcp-config",
+            "--setting-sources",
+            "",
             "--no-session-persistence",
         ]
         if self._mcp_config is not None:
@@ -126,12 +129,16 @@ class ClaudeCodeAdapter(AgenticHarnessAdapter):
             native = json.loads(line)
             kind = native.get("type")
             if kind == "result":
+                # An API error, not an answer: end the turn as a failure of the harness.
+                if native.get("is_error"):
+                    raise HarnessError(
+                        f"Claude Code failed: {native.get('result') or native.get('subtype')}"
+                    )
                 yield HarnessEvent(
                     type=HarnessEventType.TURN_COMPLETE,
                     data={
                         "response": native.get("result") or "",
                         "done": False,
-                        "is_error": native.get("is_error", False),
                         "num_turns": native.get("num_turns"),
                         "usage": native.get("usage"),
                     },

@@ -18,7 +18,7 @@ The full code is in [`examples/claude_code_harness_eval`](https://github.com/hug
 
 ## Install Dependencies
 
-You need the `claude` CLI, logged in or with `ANTHROPIC_API_KEY` set. Then, from a clone of OpenEnv:
+You need the `claude` CLI, logged in or with `ANTHROPIC_API_KEY` set, and Python 3.12 or later, which τ²-bench requires. Then, from a clone of OpenEnv:
 
 ```bash
 pip install -e . -e envs/tau2_env
@@ -36,7 +36,7 @@ An `AgenticHarnessAdapter` tells `HarnessEnvironment` how to start a harness, ho
 | `start()` | spawns the process with `HarnessProcess`. Claude Code prints nothing until the first message |
 | `send_message_streaming()` | writes `{"type": "user", "message": {...}}` on stdin and maps stdout events: `tool_use` → `TOOL_CALL`, `tool_result` → `TOOL_RESULT`, `text` → `TEXT_OUTPUT`, and `result` (end of turn) → `TURN_COMPLETE` |
 
-Claude Code's own tools are turned off (`--tools ""`), so the agent can only act through the environment's tools: it has no shell, no file access and no way to open connections of its own, which keeps the local runs below safe on a laptop. To give it shell or file tools as well, list them in `--tools` and run it in a sandbox: the [container](#serve-it-in-a-container) keeps it away from your machine, and an egress allowlist (for example `ACASandboxProvider.deny_all_egress()`) keeps it to the model's API.
+Claude Code's own tools are turned off (`--tools ""`), so the agent can only act through the environment's tools: it has no shell, no file access and no way to open connections of its own. It also loads no settings files (`--setting-sources ""`), so your hooks and `CLAUDE.md` stay out of the run. To give it shell or file tools as well, list them in `--tools` and run it in a sandbox: the [container](#serve-it-in-a-container) keeps it away from your machine, and an egress allowlist (for example `ACASandboxProvider.deny_all_egress()`) keeps it to the model's API.
 
 ## Join It to τ²-bench
 
@@ -99,7 +99,7 @@ The first airline test tasks are a gentle start. Tasks 2 and 6 only look things 
 
 ## Serve It in Production Mode
 
-The same harness can be served over the `WS /harness` route ([production mode](../guides/simulation-vs-production)). The server takes one connection at a time, each with a fresh Claude Code process and a fresh copy of the task's database, and `/reset` and `/step` are not exposed. Here you play the customer, so `serve.py` builds `Tau2Harness(..., simulated_customer=False)` and nothing is scored:
+The same harness can be served over the `WS /harness` route ([production mode](../guides/simulation-vs-production)). The server takes one connection at a time, each with a fresh Claude Code process and a fresh copy of the task's database. `/harness` sends your messages straight to Claude Code, without the environment's turn logic, so you play the customer and nothing is scored. The server has no authentication, and every connection spends your credentials, so keep it on localhost or behind your own auth:
 
 ```bash
 PYTHONPATH=src:envs:examples/claude_code_harness_eval \
@@ -115,7 +115,7 @@ RFC 005 runs the harness inside the environment's container, apart from the mach
 
 ```bash
 docker build -t claude-code-tau2 -f examples/claude_code_harness_eval/Dockerfile .
-docker run -p 8000:8000 -e HF_TOKEN -e ANTHROPIC_API_KEY claude-code-tau2
+docker run -p 127.0.0.1:8000:8000 -e HF_TOKEN -e ANTHROPIC_API_KEY claude-code-tau2
 python examples/claude_code_harness_eval/chat.py ws://localhost:8000/harness \
     "Hi, I'm Noah Muller, user id noah_muller_9847. What reservations do I have?"
 ```
@@ -125,7 +125,7 @@ Use `-e CLAUDE_CODE_OAUTH_TOKEN` instead of `ANTHROPIC_API_KEY` to run on a Clau
 ## Things to Know
 
 - Claude Code adds today's date to its context, while each τ²-bench policy states its own current time (airline is 2024-05-15). The agent prompt tells it to use the policy's time. Without that line, it books flights in the wrong year.
-- When the Anthropic API drops a request, Claude Code ends the turn with the error as its reply (`API Error: Connection dropped (ECONNRESET)`), and the customer sees it. Rerun the task if that happens.
+- When the Anthropic API fails a request (for example `API Error: Connection dropped (ECONNRESET)`), the adapter ends the turn as a harness failure, so the step comes back with `done` and `error_type` `harness_crashed`, and `run_eval.py` reports the task as `ERROR` and leaves it out of pass^1. Rerun it.
 
 ## Adapting It
 

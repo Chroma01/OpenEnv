@@ -166,12 +166,13 @@ jobs:
           git sparse-checkout set --no-cone data/tau2/domains data/tau2/user_simulator
           git checkout 5bfa7e37b36656b37dc6d022156be6563c1007f3
 
-      - name: Run τ²-bench environment tests
+      - name: Run τ²-bench environment and Claude Code recipe tests
         run: |
           uv run --python 3.12 --frozen --project envs/tau2_env --all-extras \
-            pytest tests/envs/test_tau2_env.py -v --tb=short
+            pytest tests/envs/test_tau2_env.py \
+            tests/scripts/test_claude_code_harness_eval_example.py -v --tb=short
         env:
-          PYTHONPATH: src:envs
+          PYTHONPATH: src:envs:examples/claude_code_harness_eval
           TAU2_DATA_DIR: ${{ runner.temp }}/tau2-bench/data
 
   check-env-docs:
