@@ -236,6 +236,7 @@ class Tau2Environment(MCPEnvironment):
         seed: Optional[int] = None,
         episode_id: Optional[str] = None,
         task_id: Optional[str] = None,
+        hf_token: Optional[str] = None,
         **kwargs: Any,
     ) -> Observation:
         """
@@ -248,16 +249,23 @@ class Tau2Environment(MCPEnvironment):
                 Episode identifier. A UUID is generated when `None`.
             task_id (`str`, *optional*):
                 The τ²-bench task to run. A random task of the split otherwise.
+            hf_token (`str`, *optional*):
+                Token for the `"hf"` provider, used from now on in this session. Lets a
+                client bring its own token to a server without one. It is not stored in
+                the state.
 
         Returns:
             `Observation` whose metadata has the user's first message, the
             domain policy the agent must follow, and the task id.
         """
+        if hf_token and self.user_provider == "hf":
+            self.user_llm_args = {**self.user_llm_args, "api_key": hf_token}
         # Only conversations need the token, so the server and its task explorer run without one.
         if self.user_provider == "hf" and not self.user_llm_args["api_key"]:
             raise ValueError(
-                "HF_TOKEN is not set. The simulated user runs on Hugging Face Inference "
-                "Providers by default: set HF_TOKEN, or TAU2_USER_PROVIDER=openai|anthropic."
+                "No Hugging Face token. The simulated user runs on Hugging Face Inference "
+                "Providers by default: pass hf_token to reset(), set HF_TOKEN on the "
+                "server, or set TAU2_USER_PROVIDER=openai|anthropic."
             )
         task_id = task_id or random.Random(seed).choice(self.task_ids)
         self._end_conversation()
@@ -269,6 +277,12 @@ class Tau2Environment(MCPEnvironment):
             user_llm_args=self.user_llm_args,
         )
         first_message, info = self._gym.reset(seed=seed)
+        if not first_message:  # τ²-bench only logs why, e.g. a rejected token
+            self._gym = None
+            raise RuntimeError(
+                f"The simulated user could not open the conversation with {self.user_llm}. "
+                "Check its credential and the server log."
+            )
         self._state = Tau2State(
             episode_id=episode_id or str(uuid.uuid4()),
             step_count=0,

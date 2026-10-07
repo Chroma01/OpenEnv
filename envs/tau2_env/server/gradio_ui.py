@@ -178,9 +178,10 @@ class Episode:
     def __init__(self, env: Tau2Environment, task_id: str):
         self.env = env
         self.task_id = task_id
+        # e.g. the customer has no credential, or its provider rejects it
         try:
             self.observation = env.reset(task_id=task_id)
-        except ValueError as error:  # e.g. no credentials for the simulated customer
+        except (ValueError, RuntimeError) as error:
             raise gr.Error(str(error)) from error
         self.events = [
             {"kind": "customer", "text": self.observation.metadata["user_message"]}

@@ -68,7 +68,7 @@ async with Tau2Env(base_url="http://localhost:8000") as env:
     user = await env.call_tool("get_user_details", user_id="noah_muller_9847")
 ```
 
-`reset()` takes `task_id` to run a given task, or picks one of the split at random (`seed` makes it reproducible). Give the agent the policy as its system prompt.
+`reset()` takes `task_id` to run a given task, or picks one of the split at random (`seed` makes it reproducible). Give the agent the policy as its system prompt. With the default `hf` provider, `reset(hf_token=...)` makes the session's user and judge run on your token, which is how to use a server that has none, like the public Space (`base_url="https://sergiopaniego-tau2-env.hf.space"`).
 
 ## Running the server
 
@@ -99,7 +99,7 @@ docker build -t tau2-env -f envs/tau2_env/server/Dockerfile envs/tau2_env
 docker run -p 8000:8000 -e HF_TOKEN=hf_... tau2-env
 ```
 
-On a Space, the UI's runs use each visitor's own token once they sign in, so the Space needs no secret. An `HF_TOKEN` secret (or the provider's key) is only needed for the API (`reset()`, the MCP tools), and the UI never uses it. Without credentials the server and the task explorer still run, and `reset()` explains what is missing.
+On a Space, the UI's runs use each visitor's own token once they sign in, so the Space needs no secret. API clients pass their own with `reset(hf_token=...)`, so an `HF_TOKEN` secret is only a fallback for clients that don't, and the UI never uses it. Without credentials the server and the task explorer still run, and `reset()` explains what is missing.
 
 The image starts from a Python 3.12 base rather than `openenv-base`, because τ²-bench requires Python 3.12+.
 

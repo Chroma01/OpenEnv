@@ -114,7 +114,35 @@ def test_providers(monkeypatch):
 def test_reset_needs_hf_token(monkeypatch):
     monkeypatch.delenv("HF_TOKEN", raising=False)
     env = Tau2Environment(domain="airline")  # starts without it
-    with pytest.raises(ValueError, match="HF_TOKEN"):
+    with pytest.raises(ValueError, match="hf_token"):
+        env.reset(task_id="0")
+
+
+def test_reset_takes_the_clients_hf_token(monkeypatch):
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    keys = []
+
+    def completion(**kwargs):
+        keys.append(kwargs["api_key"])
+        return litellm.completion(
+            model="openai/scripted", messages=kwargs["messages"], mock_response="Hi."
+        )
+
+    monkeypatch.setattr(llm_utils, "completion", completion)
+    env = Tau2Environment(domain="airline")
+    env.reset(task_id="0", hf_token="hf_client")
+    env.reset(task_id="1")  # kept for the session
+    assert keys == ["hf_client", "hf_client"]
+    assert "hf_client" not in env.state.model_dump_json()
+    env.close()
+
+
+def test_reset_fails_when_the_user_cannot_start(env, monkeypatch):
+    def completion(**kwargs):
+        raise litellm.AuthenticationError("bad token", "openai", "scripted")
+
+    monkeypatch.setattr(llm_utils, "completion", completion)
+    with pytest.raises(RuntimeError, match="could not open the conversation"):
         env.reset(task_id="0")
 
 
