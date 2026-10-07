@@ -12,6 +12,8 @@ Environment variables:
     TAU2_USER_PROVIDER: hf, openai or anthropic (default: hf)
     TAU2_USER_MODEL: model for the simulated user and judge (default: the provider's)
     HF_TOKEN / OPENAI_API_KEY / ANTHROPIC_API_KEY: credential for the provider
+    TAU2_DATA_DIR: τ²-bench's `data` folder (set in the Docker image)
+    MAX_CONCURRENT_ENVS: API sessions at once (default: 8)
 """
 
 import json

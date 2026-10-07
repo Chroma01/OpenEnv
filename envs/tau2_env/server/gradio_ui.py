@@ -257,7 +257,8 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
     Args:
         make_env (`Callable[..., Tau2Environment]`):
             Environment factory. Called with no arguments for the server's defaults,
-            or with `domain`, `split`, `user_model` and `hf_token` to override them.
+            or with `domain`, `split`, `user_provider`, `user_model` and `hf_token` to
+            override them. The UI's conversations always run on Inference Providers.
     """
 
     @lru_cache(maxsize=None)
@@ -326,7 +327,13 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
         cat = catalog(domain, split)
         token = hf_token(oauth_token)
         episode = Episode(
-            make_env(domain=domain, split=split, user_model=user_model, hf_token=token),
+            make_env(
+                domain=domain,
+                split=split,
+                user_provider="hf",
+                user_model=user_model,
+                hf_token=token,
+            ),
             task_id,
         )
         try:
@@ -441,7 +448,13 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
     ):
         token = hf_token(oauth_token)
         episode = Episode(
-            make_env(domain=domain, split=split, user_model=user_model, hf_token=token),
+            make_env(
+                domain=domain,
+                split=split,
+                user_provider="hf",
+                user_model=user_model,
+                hf_token=token,
+            ),
             task_id,
         )
         close_episode(previous)  # only once the new one has started
@@ -508,7 +521,11 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
         home = catalog(default.domain, default.split)
         help_text, example = home.tool_help(home.default_tool)
         models = model_choices()
-        default_user_model = default.user_llm.split("/", 1)[-1]
+        default_user_model = (
+            default.user_llm.split("/", 1)[-1]
+            if default.user_provider == "hf"
+            else DEFAULT_MODEL
+        )
 
         with gr.Blocks() as demo, gr.Column(elem_classes="t2"):
             gr.HTML(f"<style>{css}</style>", elem_classes="t2-style", **html)

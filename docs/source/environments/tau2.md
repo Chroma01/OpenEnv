@@ -54,6 +54,7 @@ Any model of the provider works through `TAU2_USER_MODEL` (for `hf`, any [Infere
 ## Quick start
 
 ```python
+from openenv.core.env_server.mcp_types import CallToolAction
 from tau2_env import Tau2Env
 
 async with Tau2Env(base_url="http://localhost:8000") as env:
@@ -66,6 +67,11 @@ async with Tau2Env(base_url="http://localhost:8000") as env:
         "respond_to_user", message="Happy to help. What's your user id?"
     )
     user = await env.call_tool("get_user_details", user_id="noah_muller_9847")
+
+    # `call_tool` returns the tool's output only. `step` also returns whether the
+    # episode is over and, once it is, the reward.
+    result = await env.step(CallToolAction(tool_name="done", arguments={}))
+    print(result.done, result.reward, result.observation.metadata["reward_info"])
 ```
 
 `reset()` takes `task_id` to run a given task, or picks one of the split at random (`seed` makes it reproducible). Give the agent the policy as its system prompt. With the default `hf` provider, `reset(hf_token=...)` makes the session's user and judge run on your token, which is how to use a server that has none, like the public Space (`base_url="https://sergiopaniego-tau2-env.hf.space"`).
@@ -91,6 +97,8 @@ The Docker image does this at build time.
 | `TAU2_SPLIT` | `test` | `train`, `test` or `base` (all tasks) |
 | `TAU2_USER_PROVIDER` | `hf` | `hf`, `openai` or `anthropic` |
 | `TAU2_USER_MODEL` | the provider's default | model for the user and the judge |
+| `TAU2_DATA_DIR` | set in the Docker image | τ²-bench's `data` folder |
+| `MAX_CONCURRENT_ENVS` | `8` | API sessions at once |
 
 With Docker:
 
@@ -99,7 +107,7 @@ docker build -t tau2-env -f envs/tau2_env/server/Dockerfile envs/tau2_env
 docker run -p 8000:8000 -e HF_TOKEN=hf_... tau2-env
 ```
 
-On a Space, the UI's runs use each visitor's own token once they sign in, so the Space needs no secret. API clients pass their own with `reset(hf_token=...)`, so an `HF_TOKEN` secret is only a fallback for clients that don't, and the UI never uses it. Without credentials the server and the task explorer still run, and `reset()` explains what is missing.
+On a Space, the UI's runs use each visitor's own token once they sign in, so the Space needs no secret. They always run on Inference Providers, whatever `TAU2_USER_PROVIDER` is. API clients pass their own with `reset(hf_token=...)`, so an `HF_TOKEN` secret is only a fallback for clients that don't, and the UI never uses it. Without credentials the server and the task explorer still run, and `reset()` explains what is missing.
 
 The image starts from a Python 3.12 base rather than `openenv-base`, because τ²-bench requires Python 3.12+.
 

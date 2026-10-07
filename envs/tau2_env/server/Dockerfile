@@ -2,17 +2,10 @@
 # starts from uv's Python 3.12 image instead.
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
-# git is needed to install τ²-bench, which is pinned to a GitHub commit.
-RUN apt-get update && apt-get install -y --no-install-recommends git \
+# git is needed to install τ²-bench, which is pinned to a GitHub commit, and curl by the
+# release deployment (scripts/prepare_hf_deployment.sh), which installs its own uv.
+RUN apt-get update && apt-get install -y --no-install-recommends git curl \
     && rm -rf /var/lib/apt/lists/*
-
-COPY . /app/env
-WORKDIR /app/env
-
-# The uv cache is shared across builds, and this project's version rarely changes, so
-# rebuild it every time; otherwise a cached wheel of older code gets installed.
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-editable --reinstall-package openenv-tau2-env
 
 # τ²-bench's tasks, databases and policies live in its repository, not in the package.
 # Keep the commit in sync with the `tau2` pin in pyproject.toml.
@@ -23,12 +16,20 @@ RUN git clone --filter=blob:none --no-checkout https://github.com/sierra-researc
     && rm -rf .git
 ENV TAU2_DATA_DIR="/opt/tau2-bench/data"
 
+COPY . /app/env
+WORKDIR /app/env
+
+# The uv cache is shared across builds, and this project's version rarely changes, so
+# rebuild it every time; otherwise a cached wheel of older code gets installed.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-editable --reinstall-package openenv-tau2-env
+
 ENV PATH="/app/env/.venv/bin:$PATH"
 ENV PYTHONPATH="/app/env:$PYTHONPATH"
 
 # The simulated user runs on Hugging Face Inference Providers by default. On a Space,
-# visitors sign in and use their own token. API clients need HF_TOKEN, or
-# TAU2_USER_PROVIDER=openai|anthropic with that provider's key.
+# visitors sign in and use their own token, and API clients pass theirs to reset(). HF_TOKEN,
+# or TAU2_USER_PROVIDER=openai|anthropic with that provider's key, is the fallback.
 ENV ENABLE_WEB_INTERFACE=true
 ENV TAU2_DOMAIN="airline"
 ENV TAU2_SPLIT="test"

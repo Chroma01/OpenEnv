@@ -268,21 +268,22 @@ class Tau2Environment(MCPEnvironment):
                 "server, or set TAU2_USER_PROVIDER=openai|anthropic."
             )
         task_id = task_id or random.Random(seed).choice(self.task_ids)
-        self._end_conversation()
-        self._gym = AgentGymEnv(
+        gym = AgentGymEnv(
             domain=self.domain,
             task_id=task_id,
             max_steps=self.max_steps,
             user_llm=self.user_llm,
             user_llm_args=self.user_llm_args,
         )
-        first_message, info = self._gym.reset(seed=seed)
+        first_message, info = gym.reset(seed=seed)
         if not first_message:  # τ²-bench only logs why, e.g. a rejected token
-            self._gym = None
             raise RuntimeError(
                 f"The simulated user could not open the conversation with {self.user_llm}. "
                 "Check its credential and the server log."
             )
+        # Only once the new conversation has started, so a failed reset keeps the current one.
+        self._end_conversation()
+        self._gym = gym
         self._state = Tau2State(
             episode_id=episode_id or str(uuid.uuid4()),
             step_count=0,

@@ -137,13 +137,23 @@ def test_reset_takes_the_clients_hf_token(monkeypatch):
     env.close()
 
 
-def test_reset_fails_when_the_user_cannot_start(env, monkeypatch):
+def test_a_failed_reset_keeps_the_conversation(env, scripted_user, monkeypatch):
+    scripted_user += ["Hi, my user id is noah_muller_9847.", "Thanks. ###STOP###"]
+    env.reset(task_id="2")
+
     def completion(**kwargs):
         raise litellm.AuthenticationError("bad token", "openai", "scripted")
 
+    scripted_completion = llm_utils.completion
     monkeypatch.setattr(llm_utils, "completion", completion)
     with pytest.raises(RuntimeError, match="could not open the conversation"):
         env.reset(task_id="0")
+
+    monkeypatch.setattr(llm_utils, "completion", scripted_completion)
+    observation = env.step(
+        CallToolAction(tool_name="respond_to_user", arguments={"message": "Done."})
+    )
+    assert env.state.task_id == "2" and observation.done
 
 
 def test_each_conversation_has_its_own_judge(monkeypatch):
@@ -183,6 +193,12 @@ def test_server_and_ui_start_without_credentials(monkeypatch):
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.setenv("ENABLE_WEB_INTERFACE", "true")
     import tau2_env.server.app as server
+    import tau2_env.server.gradio_ui as ui
+
+    # The model list comes from the Inference Providers router; keep the test offline.
+    monkeypatch.setattr(
+        ui, "model_choices", lambda: [(m, m) for m in ui.FALLBACK_MODELS]
+    )
     from fastapi.testclient import TestClient
 
     client = TestClient(importlib.reload(server).app)

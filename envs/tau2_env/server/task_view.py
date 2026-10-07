@@ -4,9 +4,9 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""HTML for the task explorer and the task page.
+"""HTML for the task explorer, the task page and the conversations.
 
-Everything here comes from τ²-bench's task files, so every value is escaped.
+The values come from τ²-bench's task files and from models, so every one is escaped.
 """
 
 import json
