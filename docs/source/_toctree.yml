@@ -61,10 +61,14 @@
       title: SFT Training with Environments
     title: Training
   - sections:
+    - local: tutorials/harnesses
+      title: Overview
     - local: tutorials/browsergym-harness
-      title: Agentic Harness
+      title: "White-box: Train with TRL's Loop (BrowserGym)"
+    - local: tutorials/harbor-harness
+      title: "Black-box: Train Real Agents (Harbor)"
     - local: tutorials/claude-code-harness
-      title: Evaluate Claude Code in an Environment
+      title: "Agent in Your Env: Evaluate Claude Code"
     - local: tutorials/opencode-agent-grpo
       title: OpenCode (deprecated)
     - local: tutorials/pi-agent-grpo
