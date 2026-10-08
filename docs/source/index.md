@@ -22,7 +22,7 @@
     </div>
     <div class="border dark:border-gray-700 p-5 rounded-lg shadow">
       <div class="font-bold mb-2">Train with your framework</div>
-      <p>TRL, Unsloth, SkyRL, ART, Oumi, torchforge, Miles and more.</p>
+      <p>TRL, Unsloth, SkyRL, ART, Oumi, torchforge, Miles and more. See <a href="guides/training">Training with OpenEnv</a>.</p>
     </div>
     <div class="border dark:border-gray-700 p-5 rounded-lg shadow">
       <div class="font-bold mb-2">Train real coding agents</div>
@@ -38,7 +38,7 @@
 ## Where to start
 
 1. **[Getting Started](getting-started)**: install OpenEnv, connect to an environment and run your first step.
-2. **[Train an agent](tutorials/wordle-grpo)**: train with TRL's `GRPOTrainer` and `environment_factory`. To train a coding agent that runs its own loop, see [Harbor](environments/harbor).
+2. **[Train an agent](guides/training)**: pick a way to train and a framework. The [Wordle GRPO tutorial](tutorials/wordle-grpo) is a worked example with TRL, and [Harbor](environments/harbor) captures coding agents that run their own loop, for training.
 3. **[Build your own environment](guides/first-environment)**, then [package and deploy it](getting_started/environment-builder) to Hugging Face Spaces.
 4. **[Explore environments](environments)**: browse the catalog.
 

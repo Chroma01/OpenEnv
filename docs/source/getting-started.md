@@ -159,7 +159,7 @@ The same client also runs environments on cloud sandboxes (Daytona, Modal, Novit
 
 ## Next Steps
 
-- [Train an agent with TRL](tutorials/wordle-grpo), or a coding agent through [Harbor](environments/harbor)
+- [Train an agent](guides/training) with your framework, for example [TRL](tutorials/wordle-grpo), or a coding agent through [Harbor](environments/harbor)
 - [Explore environments](environments)
 - [Build your first environment](guides/first-environment)
 - [Concepts](guides/concepts)
