@@ -11,8 +11,6 @@
     title: Auto-Discovery
   - local: guides/catalog-discovery
     title: Catalog Discovery
-  - local: guides/harbor-provider-qualification
-    title: Harbor Spec
   - local: guides/rewards
     title: Rewards
   - local: guides/concepts
@@ -95,6 +93,8 @@
     title: Coding Tools
   - local: environments/harbor
     title: Harbor
+  - local: guides/harbor-provider-qualification
+    title: Harbor Qualification
   - local: environments/chat
     title: Chat
   - local: environments/atari
