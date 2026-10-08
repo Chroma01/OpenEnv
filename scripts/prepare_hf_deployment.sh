@@ -640,7 +640,8 @@ This Space is built from OpenEnv environment \`$env_name\`.
 - OpenEnv pinned ref: \`$OPENENV_VERSION\`
 - Hub tag: \`$HUB_TAG\`
 README_EOF
-        if [ -n "$env_class" ]; then
+        # The snippet needs anonymous access, so private Spaces skip it.
+        if [ -n "$env_class" ] && [ "$PRIVATE" = false ]; then
             cat >> "$output_readme" << README_EOF
 
 ### Connecting from Code
