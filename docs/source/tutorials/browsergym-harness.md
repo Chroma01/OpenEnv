@@ -1,6 +1,6 @@
 # White-Box: Train a Web Agent on BrowserGym
 
-This tutorial trains a model to complete web tasks in [BrowserGym](../environments/browsergym) with TRL's `GRPOTrainer`. It is the **white-box** harness path: TRL owns the agent loop. It samples every turn, parses the tool calls, runs them against the environment and feeds the results back, so it has the token ids and logprobs of everything the model generated without capturing anything. [Harnesses in OpenEnv](harnesses) compares it to the other paths.
+This tutorial trains a model to complete web tasks in [BrowserGym](../environments/browsergym) with TRL's `GRPOTrainer`. It is the **white-box** harness path: the trainer, here TRL, owns the agent loop. It samples every turn, parses the tool calls, runs them against the environment and feeds the results back, so it has the token ids and logprobs of everything the model generated without capturing anything. [Harnesses in OpenEnv](harnesses) compares it to the other paths, and [Training with OpenEnv](../guides/training) lists the other frameworks that train on OpenEnv environments.
 
 The full script is TRL's [`examples/grpo_browsergym/grpo_browsergym.py`](https://github.com/huggingface/trl/tree/main/examples/grpo_browsergym). This page walks through its parts.
 
