@@ -55,7 +55,7 @@ async def main():
                 arguments={"message": "Hello, World!"},
             )
         )
-        print(result.observation.result)  # "Hello, World!"
+        print(result.observation.result["data"])  # "Hello, World!"
         print(result.reward)
 
 asyncio.run(main())
@@ -75,7 +75,7 @@ with EchoEnv(base_url="https://openenv-echo-env.hf.space").sync() as client:
             arguments={"message": "Hello, World!"},
         )
     )
-    print(result.observation.result)
+    print(result.observation.result["data"])
 ```
 
 For a detailed quick start, check out the [docs page](https://huggingface.co/docs/openenv/getting-started).
@@ -136,7 +136,7 @@ OpenEnv works with a growing ecosystem of RL frameworks and platforms. If your p
 - [Contributing](https://github.com/huggingface/OpenEnv/blob/main/CONTRIBUTING.md): development setup, tests and the PR process
 
 > [!NOTE]
-> OpenEnv is in early development, so APIs may still change. Bug fixes are welcome; for larger changes, open or claim an issue first so the change can be discussed.
+> OpenEnv is in early development, so APIs may still change. Bug fixes are welcome. For larger changes, open or claim an issue first so the change can be discussed.
 
 ## Community Support & Acknowledgments
 
