@@ -169,7 +169,7 @@ def test_each_conversation_has_its_own_judge(monkeypatch):
         def step(self, action):
             both_stepping.wait()
             nl_assertions.generate(model="default", messages=[], call_name="judge")
-            return "user: bye", 1.0, True, False, {"reward_info": "{}"}
+            return "user: bye", 1.0, True, False, {"reward_info": '{"reward": 1.0}'}
 
     def converse(token):
         env = Tau2Environment(domain="airline", hf_token=token)
@@ -187,6 +187,27 @@ def test_each_conversation_has_its_own_judge(monkeypatch):
         "hf_a": "hf_a",
         "hf_b": "hf_b",
     }
+
+
+def test_a_failed_user_ends_the_conversation_without_a_score(env, monkeypatch):
+    replies = iter(["Hi, my user id is noah_muller_9847."])
+
+    def completion(**kwargs):
+        reply = next(replies, None)
+        if reply is None:
+            raise litellm.APIConnectionError("the provider is down", "openai", "x")
+        return litellm.completion(
+            model="openai/scripted", messages=kwargs["messages"], mock_response=reply
+        )
+
+    monkeypatch.setattr(llm_utils, "completion", completion)
+    env.reset(task_id="2")
+    observation = env.step(
+        CallToolAction(tool_name="respond_to_user", arguments={"message": "Hello."})
+    )
+    assert observation.error is not None
+    assert "simulated user failed" in observation.error.message
+    assert env.state.done and env.state.reward_info == {}
 
 
 def test_tool_arguments_must_be_a_json_object():
