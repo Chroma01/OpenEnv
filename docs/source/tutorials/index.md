@@ -3,7 +3,7 @@
 Choose a learning path from the sidebar:
 
 - **Basics:** start with [Hello World](openenv-tutorial) and build [Your First Environment](../guides/first-environment).
-- **Training:** [the ways to train and the supported frameworks](../guides/rl-integration), then train a [reasoning model](end-to-end-walkthrough), use [TRL](wordle-grpo) or [Unsloth](rl-training-2048), or collect rollouts for [SFT](sft-warmup).
+- **Training:** [the ways to train and the supported frameworks](../guides/training), then train a [reasoning model](end-to-end-walkthrough), use [TRL](wordle-grpo) or [Unsloth](rl-training-2048), or collect rollouts for [SFT](sft-warmup).
 - **Harnesses:** [pick a path](harnesses): train with the trainer's own loop on [BrowserGym](browsergym-harness) (white-box), train real agents through [Harbor](harbor-harness) (black-box), or [evaluate Claude Code inside an environment](claude-code-harness). The [OpenCode](opencode-agent-grpo) and [Pi](pi-agent-grpo) tutorials are deprecated.
 - **Evals:** follow [Evaluating with Environments](evaluation-inspect).
 

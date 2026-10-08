@@ -32,4 +32,4 @@ Each rollout comes back as a `TrainingTrace`: the token ids, logprobs and loss m
 
 - [The Harbor environment](../environments/harbor): supported agents and sandboxes, the web UI, deploying to Spaces and troubleshooting.
 - [TRL's Harbor integration](https://huggingface.co/docs/trl/harbor) for the white-box path on Harbor tasks, where TRL's own loop works through a Harbor task suite.
-- [Training with OpenEnv](../guides/rl-integration) for the other ways to train and the frameworks that support them.
+- [Training with OpenEnv](../guides/training) for the other ways to train and the frameworks that support them.

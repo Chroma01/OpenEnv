@@ -49,7 +49,7 @@
       title: Your First Environment
     title: Basics
   - sections:
-    - local: guides/rl-integration
+    - local: guides/training
       title: Overview
     - local: tutorials/end-to-end-walkthrough
       title: Train a Reasoning Model

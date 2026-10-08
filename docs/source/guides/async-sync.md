@@ -70,5 +70,5 @@ asyncio.run(main())
 
 ## Next Steps
 
-- [Training with OpenEnv](rl-integration.md) - Using async with RL training
+- [Training with OpenEnv](training.md) - Using async with RL training
 - [Auto-Discovery](auto-discovery.md) - Discover and load environments
