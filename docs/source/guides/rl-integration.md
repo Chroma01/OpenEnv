@@ -1,41 +1,39 @@
-# RL Framework Integration
+# Training with OpenEnv
 
-> [!NOTE]
-> This page is still being filled in. TRL integration is covered below; torchforge and SkyRL integrations are planned.
+OpenEnv is a contract between environments and the code that uses them, not a trainer. An environment exposes `reset()`, `step()` and `state()` (and its tools over MCP), runs as a service anywhere, and computes its own reward, so any training framework that can call it can train on it. This page maps the ways to train on OpenEnv environments and the frameworks that support it.
 
-Use OpenEnv with popular RL frameworks like TRL, torchforge, and SkyRL.
+## Ways to Train
 
-## Overview
+| You want to | What the environment gives | Worked examples |
+|---|---|---|
+| Train a model with RL, with the trainer running the episode | Observations, tools and a reward. The trainer generates every turn, so it has the tokens and logprobs. This is the white-box path | [Wordle](../tutorials/wordle-grpo), [a reasoning model](../tutorials/end-to-end-walkthrough), [web tasks in BrowserGym](../tutorials/browsergym-harness) with TRL, [2048](../tutorials/rl-training-2048) with Unsloth |
+| Train the model behind a real agent (OpenCode, Claude Code, Codex, …) | Harbor runs the agent on a task, captures every model call, and returns a `TrainingTrace` with token ids, logprobs and the verifier's reward. This is the black-box path | [Harbor](../tutorials/harbor-harness), trained with TRL's `AsyncGRPOTrainer` |
+| Warm-start a model with supervised data | `openenv collect` runs a teacher in the environment and saves reward-labeled rollouts as a dataset | [Collecting rollouts for SFT](../tutorials/sft-warmup) |
+| Evaluate, not train | Scores from the environment's rubric | [Inspect AI](../tutorials/evaluation-inspect), [an agent inside the environment](../tutorials/claude-code-harness) |
 
-OpenEnv environments are designed to integrate seamlessly with RL training frameworks. The standard `step()`, `reset()`, `state()` API makes it easy to use environments in training loops.
+None of these paths ties the environment to a framework. `openenv.core` does not depend on any trainer, and a `TrainingTrace` or a collected dataset is plain data that any trainer can read. The worked examples use the frameworks named above because that is where the examples exist today. [Harnesses in OpenEnv](../tutorials/harnesses) compares the white-box and black-box paths in more detail.
 
-## TRL Integration
+## Integrations
 
-[TRL (Transformer Reinforcement Learning)](https://huggingface.co/docs/trl) is the recommended framework for training language models with RL.
+These frameworks and platforms train on OpenEnv environments. If your project supports OpenEnv, open a PR to add it here and to the [README](https://github.com/huggingface/OpenEnv#integrations).
 
-```python
-from trl import GRPOTrainer
-from openenv import AutoEnv, AutoAction
+| Framework | Example |
+|---|---|
+| [TRL](https://huggingface.co/docs/trl) | [OpenEnv integration guide](https://huggingface.co/docs/trl/openenv): `environment_factory` with `GRPOTrainer`, several environments at once, and harness training through Harbor |
+| [torchforge](https://meta-pytorch.org/torchforge/) | [GRPO on BlackJack](https://github.com/huggingface/OpenEnv/tree/main/examples/grpo_blackjack) |
+| [Unsloth](https://unsloth.ai) | [2048 with gpt-oss](https://colab.research.google.com/github/unslothai/notebooks/blob/main/nb/OpenEnv_gpt_oss_(20B)_Reinforcement_Learning_2048_Game.ipynb) |
+| [SkyRL](https://github.com/NovaSky-AI/SkyRL) | [Training on OpenEnv environments](https://skyrl.readthedocs.io/en/latest/examples/openenv.html) |
+| [ART](https://art.openpipe.ai) | [OpenEnv integration](https://art.openpipe.ai/integrations/openenv-integration) |
+| [Oumi](https://github.com/oumi-ai/oumi) | [OpenEnv GRPO notebook](https://github.com/oumi-ai/oumi/blob/main/notebooks/Oumi%20-%20OpenEnv%20GRPO%20with%20trl.ipynb) |
+| [Lightning AI](https://lightning.ai) | [OpenEnv templates](https://lightning.ai/templates?section=featured&query=openenv) |
+| [Miles](https://github.com/radixark/miles) | [GRPO on Terminal-Bench 2](https://github.com/radixark/miles/tree/main/examples/experimental/openenv) |
 
-env = AutoEnv.from_env("textarena")
-TextAction = AutoAction.from_env("textarena")
+## Your Own Training Loop
 
-# Use with TRL's GRPO trainer
-trainer = GRPOTrainer(
-    model=model,
-    reward_model=reward_model,
-    # ... TRL config
-)
-```
-
-See the [Wordle with GRPO](../tutorials/wordle-grpo.md) tutorial for a complete example.
-
-## Generic Training Loop
-
-For custom training setups:
+Every integration above comes down to the same calls. To plug OpenEnv into a framework that has no integration yet, drive the client from its rollout code:
 
 ```python
-from openenv import AutoEnv, AutoAction
+from openenv import AutoAction, AutoEnv
 
 env = AutoEnv.from_env("my-env")
 Action = AutoAction.from_env("my-env")
@@ -43,19 +41,10 @@ Action = AutoAction.from_env("my-env")
 with env.sync() as client:
     for episode in range(num_episodes):
         result = client.reset()
-
-        while not result.terminated:
-            # Get action from your policy
-            action = policy(result.observation)
-
-            # Take step
+        while not result.done:
+            action = policy(result.observation)  # your model picks the next action
             result = client.step(action)
-
-            # Update policy with reward
-            policy.update(result.reward)
+            # result.reward is the environment's reward for this step
 ```
 
-## Next Steps
-
-- [Reward Design](rewards.md) - Design effective reward functions
-- [Wordle with GRPO](../tutorials/wordle-grpo.md) - Complete TRL example
+The [Task API](task-api) lets a trainer list an environment's tasks and pick which one each episode runs, and [Rewards](rewards) covers how environments compute the reward.

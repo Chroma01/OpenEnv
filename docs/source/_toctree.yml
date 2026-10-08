@@ -11,8 +11,6 @@
     title: Auto-Discovery
   - local: guides/catalog-discovery
     title: Catalog Discovery
-  - local: guides/rl-integration
-    title: RL Training
   - local: guides/harbor-provider-qualification
     title: Harbor Spec
   - local: guides/rewards
@@ -51,6 +49,8 @@
       title: Your First Environment
     title: Basics
   - sections:
+    - local: guides/rl-integration
+      title: Overview
     - local: tutorials/end-to-end-walkthrough
       title: Train a Reasoning Model
     - local: tutorials/wordle-grpo
@@ -64,7 +64,7 @@
     - local: tutorials/harnesses
       title: Overview
     - local: tutorials/browsergym-harness
-      title: "White-box: Train with TRL's Loop (BrowserGym)"
+      title: "White-box: Train a Web Agent (BrowserGym)"
     - local: tutorials/harbor-harness
       title: "Black-box: Train Real Agents (Harbor)"
     - local: tutorials/claude-code-harness

@@ -1,6 +1,6 @@
 # Black-Box: Train Real Agents with Harbor
 
-Some agents can't be reimplemented as a TRL tool loop. A coding agent such as OpenCode, Claude Code or Codex has its own planner, tools, context management and stop condition, and the point is to train the model that drives *that* agent. This is the **black-box** harness path: the agent owns its loop, and OpenEnv records every model call it makes. Episodes are tasks: an instruction goes in, the agent works on its own, and a verifier checks the result. If the job is a conversation instead, or the agent has to use your environment's own tools, see [Evaluate Claude Code in an Environment](claude-code-harness). [Harnesses in OpenEnv](harnesses) compares the paths.
+Some agents can't be reimplemented as a trainer's tool loop. A coding agent such as OpenCode, Claude Code or Codex has its own planner, tools, context management and stop condition, and the point is to train the model that drives *that* agent. This is the **black-box** harness path: the agent owns its loop, and OpenEnv records every model call it makes. Episodes are tasks: an instruction goes in, the agent works on its own, and a verifier checks the result. If the job is a conversation instead, or the agent has to use your environment's own tools, see [Evaluate Claude Code in an Environment](claude-code-harness). [Harnesses in OpenEnv](harnesses) compares the paths.
 
 OpenEnv does this through [Harbor](../environments/harbor), which supplies the tasks, the sandboxes, the agents and the verifiers. One `harbor_env` server runs any of 16 validated agents on any Harbor dataset, in any of Harbor's sandbox backends, and its capture proxy returns the token ids and logprobs of each model call together with the task's reward.
 
@@ -20,9 +20,9 @@ openenv harbor rollout \
 
 Against a hosted provider you get an evaluation rollout: the reward and the full trace. Against vLLM or SGLang you also get the token ids and logprobs that training needs. `openenv harbor info` checks first which agents, sandboxes and capture level this machine can use.
 
-## Train With TRL
+## Train on the Captures
 
-TRL trains on these rollouts with `AsyncGRPOTrainer` and a `HarnessRolloutWorker`: the agent runs each task to completion, TRL reads back the captured `TrainingTrace`, and the new weights go back into the same vLLM server.
+Each rollout comes back as a `TrainingTrace`: the token ids, logprobs and loss masks of every model call, plus the task's reward. It doesn't depend on a trainer, so any framework can train on it. TRL has a worked example: `AsyncGRPOTrainer` with a `HarnessRolloutWorker` runs each task to completion, reads back the trace, and syncs the new weights into the same vLLM server.
 
 - [TRL's guide to training on harnesses](https://huggingface.co/docs/trl/main/en/openenv#training-on-harnesses-training-real-coding-agents-harbor) explains how it works and how to wire it.
 - [`examples/async_grpo_harbor`](https://github.com/huggingface/trl/tree/main/examples/async_grpo_harbor) is the complete script, with a Hugging Face Jobs launcher.
@@ -32,3 +32,4 @@ TRL trains on these rollouts with `AsyncGRPOTrainer` and a `HarnessRolloutWorker
 
 - [The Harbor environment](../environments/harbor): supported agents and sandboxes, the web UI, deploying to Spaces and troubleshooting.
 - [TRL's Harbor integration](https://huggingface.co/docs/trl/harbor) for the white-box path on Harbor tasks, where TRL's own loop works through a Harbor task suite.
+- [Training with OpenEnv](../guides/rl-integration) for the other ways to train and the frameworks that support them.
