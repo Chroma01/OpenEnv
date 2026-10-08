@@ -1,6 +1,6 @@
 # Black-Box: Train Real Agents with Harbor
 
-Some agents can't be reimplemented as a TRL tool loop. A coding agent such as OpenCode, Claude Code or Codex has its own planner, tools, context management and stop condition, and the point is to train the model that drives *that* agent. This is the **black-box** harness path: the agent owns its loop, and OpenEnv records every model call it makes. [Harnesses in OpenEnv](harnesses) compares it to the other paths.
+Some agents can't be reimplemented as a TRL tool loop. A coding agent such as OpenCode, Claude Code or Codex has its own planner, tools, context management and stop condition, and the point is to train the model that drives *that* agent. This is the **black-box** harness path: the agent owns its loop, and OpenEnv records every model call it makes. Episodes are tasks: an instruction goes in, the agent works on its own, and a verifier checks the result. If the job is a conversation instead, or the agent has to use your environment's own tools, see [Evaluate Claude Code in an Environment](claude-code-harness). [Harnesses in OpenEnv](harnesses) compares the paths.
 
 OpenEnv does this through [Harbor](../environments/harbor), which supplies the tasks, the sandboxes, the agents and the verifiers. One `harbor_env` server runs any of 16 validated agents on any Harbor dataset, in any of Harbor's sandbox backends, and its capture proxy returns the token ids and logprobs of each model call together with the task's reward.
 

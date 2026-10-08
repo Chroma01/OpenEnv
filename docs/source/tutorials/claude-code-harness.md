@@ -18,7 +18,7 @@ simulated customer  -->  next message, or done  -->  rubric scores the database 
 The full code is in [`examples/claude_code_harness_eval`](https://github.com/huggingface/OpenEnv/tree/main/examples/claude_code_harness_eval).
 
 > [!NOTE]
-> RFC 005 does not capture token ids, so this is an evaluation path. To train the model behind an agent, or to evaluate it on tasks with a verifier rather than a conversation, use [Harbor](../environments/harbor). [Harnesses in OpenEnv](harnesses) compares the options.
+> Use this path when the job is a conversation and the agent has to use your environment's tools. RFC 005 does not capture token ids, so it evaluates and serves, but does not train. To train the model behind an agent, or to evaluate it on tasks that a verifier checks, use [Harbor](harbor-harness). [Harnesses in OpenEnv](harnesses) compares the options.
 
 ## What You'll Build
 
