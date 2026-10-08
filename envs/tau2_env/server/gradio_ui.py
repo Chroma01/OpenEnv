@@ -230,6 +230,8 @@ class Episode:
 
     def side(self, observation, running: bool = False) -> str:
         if observation is not None and observation.done:
+            if not observation.metadata["reward_info"]:  # the simulated customer failed
+                return status_html(f"Ended without a score · {self.stats()}", False)
             return result_html(
                 observation.reward, observation.metadata["reward_info"], self.stats()
             )
@@ -429,13 +431,17 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
                         {"role": "tool", "tool_call_id": call_id, "content": result}
                     )
                     if observation.done:
-                        run = episode.record(
-                            f"run-{len(runs) + 1}", model, cat, observation
-                        )
+                        # Only scored runs go to the history.
+                        if observation.metadata["reward_info"]:
+                            runs = runs + [
+                                episode.record(
+                                    f"run-{len(runs) + 1}", model, cat, observation
+                                )
+                            ]
                         yield (
                             timeline_html(episode.events, RUN_PLACEHOLDER),
                             episode.side(observation),
-                            runs + [run],
+                            runs,
                         )
                         return
                     yield (

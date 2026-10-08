@@ -201,22 +201,24 @@ def test_a_failed_user_ends_the_conversation_without_a_score(env, monkeypatch):
         )
 
     monkeypatch.setattr(llm_utils, "completion", completion)
-    env.reset(task_id="2")
-    observation = env.step(
-        CallToolAction(tool_name="respond_to_user", arguments={"message": "Hello."})
-    )
+    import tau2_env.server.gradio_ui as ui
+
+    episode = ui.Episode(env, "2")
+    observation, result = episode.act("respond_to_user", {"message": "Hello."})
     assert observation.error is not None
-    assert "simulated user failed" in observation.error.message
+    assert "simulated user failed" in result
     assert env.state.done and env.state.reward_info == {}
+    # The web UI says so instead of showing a score.
+    assert "Ended without a score" in episode.side(observation)
 
 
 def test_tool_arguments_must_be_a_json_object():
-    from tau2_env.server.gradio_ui import parse_arguments
+    import tau2_env.server.gradio_ui as ui
 
-    assert parse_arguments('{"user_id": "x"}') == {"user_id": "x"}
-    assert parse_arguments(None) == {}
+    assert ui.parse_arguments('{"user_id": "x"}') == {"user_id": "x"}
+    assert ui.parse_arguments(None) == {}
     for raw in ["not json", "[]", '"x"', "3"]:
-        assert parse_arguments(raw) is None
+        assert ui.parse_arguments(raw) is None
 
 
 def test_ui_falls_back_when_no_model_calls_tools(monkeypatch):
@@ -232,10 +234,10 @@ def test_ui_falls_back_when_no_model_calls_tools(monkeypatch):
 
 
 def test_a_failed_reply_is_not_shown_as_the_customer(env, scripted_user, monkeypatch):
-    from tau2_env.server.gradio_ui import Episode
+    import tau2_env.server.gradio_ui as ui
 
     scripted_user.append("Hi, my user id is noah_muller_9847.")
-    episode = Episode(env, "2")
+    episode = ui.Episode(env, "2")
 
     def fail(action):
         raise TimeoutError("the customer did not answer")
