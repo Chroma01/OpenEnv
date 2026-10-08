@@ -4,6 +4,9 @@ Train a language model to play 2048 with GRPO. The game runs in the OpenSpiel en
 
 The recipe follows TRL's [`examples/grpo_2048`](https://github.com/huggingface/trl/tree/main/examples/grpo_2048), which implements the game in plain Python. Here the game logic lives in an OpenEnv server instead.
 
+> [!TIP]
+> Unsloth maintains its own [2048 tutorial with OpenEnv](https://github.com/unslothai/notebooks/blob/main/nb/OpenEnv_gpt_oss_%2820B%29_Reinforcement_Learning_2048_Game.ipynb), which trains `gpt-oss-20b` with Unsloth on the same OpenSpiel server to write a 2048 strategy instead of playing move by move.
+
 > [!NOTE]
 > **Difficulty**: Advanced | **GPU Required**: Yes
 
@@ -139,6 +142,5 @@ server.terminate()
 
 ## Next steps
 
-- Unsloth has its own [2048 notebook with OpenEnv](https://github.com/unslothai/notebooks/blob/main/nb/OpenEnv_gpt_oss_%2820B%29_Reinforcement_Learning_2048_Game.ipynb), which runs the same OpenSpiel server and trains `gpt-oss-20b` to write a strategy function instead of playing move by move.
 - The [end-to-end walkthrough](end-to-end-walkthrough) covers the same `environment_factory` pattern on a single-step task, and [Wordle GRPO](wordle-grpo) on another multi-turn game.
 - The [Training overview](../guides/training) lists the other frameworks that train on OpenEnv environments.

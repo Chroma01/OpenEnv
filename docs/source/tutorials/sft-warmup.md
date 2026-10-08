@@ -154,7 +154,7 @@ OpenAI-compatible server (vLLM, TGI, Ollama) and pass the model id it serves:
 openenv collect reasoning_gym:chain_sum \
   --base-url https://sergiopaniego-reasoning-gym.hf.space \
   --llm-endpoint http://localhost:8000 \
-  --model Qwen/Qwen3-32B \
+  --model Qwen/Qwen3-8B \
   --num-episodes 300 \
   --output-dir ./rollouts
 ```
