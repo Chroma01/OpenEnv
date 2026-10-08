@@ -97,7 +97,12 @@ class Tau2Harness(HarnessEnvironment):
         if observation.done:  # e.g. Claude Code crashed
             return observation
         reply = observation.metadata["response"] or "(no reply)"
-        customer = await asyncio.to_thread(self.tau2.act, reply)
+        try:
+            customer = await asyncio.to_thread(self.tau2.act, reply)
+        except RuntimeError as error:  # e.g. the simulated customer's model failed
+            return await self._terminal_error_observation(
+                str(error), error_type="customer_failed"
+            )
         observation.metadata["customer"] = without_end_tokens(customer)
         observation.done = self.tau2.state.done
         observation.reward = await self._apply_rubric_async(action, observation)

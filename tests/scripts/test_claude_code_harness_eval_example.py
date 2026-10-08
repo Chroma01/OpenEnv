@@ -156,6 +156,31 @@ def test_an_api_error_ends_the_turn_as_a_harness_failure(tmp_path, customer):
     assert "ECONNRESET" in turn.metadata["error"]
 
 
+def test_a_failed_customer_ends_the_conversation_as_an_error(
+    tmp_path, customer, monkeypatch
+):
+    customer += ["Hi, my user id is noah_muller_9847."]
+    tau2, harness = start(tmp_path)
+
+    act = tau2.act
+
+    def customer_fails(action):  # tool calls are JSON, replies to the customer are not
+        if action.startswith("{"):
+            return act(action)
+        raise RuntimeError("The simulated user failed")
+
+    try:
+        opening = harness.reset()
+        monkeypatch.setattr(tau2, "act", customer_fails)
+        turn = harness.step(HarnessAction(message=opening.metadata["customer"]))
+    finally:
+        harness.close()
+
+    # Not a score of 0 for Claude Code: run_eval.py reports it as ERROR.
+    assert turn.done and turn.metadata["error_type"] == "customer_failed"
+    assert "simulated user failed" in turn.metadata["error"]
+
+
 def test_claude_code_exiting_mid_turn_ends_the_conversation(tmp_path, customer):
     customer += ["crash"]
     tau2, harness = start(tmp_path)

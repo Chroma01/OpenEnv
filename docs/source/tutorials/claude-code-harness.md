@@ -125,7 +125,7 @@ Use `-e CLAUDE_CODE_OAUTH_TOKEN` instead of `ANTHROPIC_API_KEY` to run on a Clau
 ## Things to Know
 
 - Claude Code adds today's date to its context, while each τ²-bench policy states its own current time (airline is 2024-05-15). The agent prompt tells it to use the policy's time. Without that line, it books flights in the wrong year.
-- When the Anthropic API fails a request (for example `API Error: Connection dropped (ECONNRESET)`), the adapter ends the turn as a harness failure, so the step comes back with `done` and `error_type` `harness_crashed`, and `run_eval.py` reports the task as `ERROR` and leaves it out of pass^1. Rerun it.
+- When the Anthropic API fails a request (for example `API Error: Connection dropped (ECONNRESET)`), the adapter ends the turn as a harness failure, so the step comes back with `done` and `error_type` `harness_crashed`, and `run_eval.py` reports the task as `ERROR` and leaves it out of pass^1. Rerun it. The same goes for the simulated customer: if its model fails, the step ends with `error_type` `customer_failed`, and the task is an `ERROR` rather than a failure of Claude Code.
 
 ## Adapting It
 
