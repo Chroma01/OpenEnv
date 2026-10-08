@@ -17,9 +17,7 @@ from contextlib import suppress
 from typing import Any
 
 import requests
-import uvicorn
-from fastapi import FastAPI, Request, Response, WebSocket
-from starlette.websockets import WebSocketDisconnect
+from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import ConnectionClosed
 
@@ -101,7 +99,7 @@ class _LocalAuthProxy:
         self.target_url = target_url.rstrip("/")
         self.headers = headers
         self.port = _find_available_port()
-        self._server: uvicorn.Server | None = None
+        self._server: Any = None
         self._thread: threading.Thread | None = None
 
     @property
@@ -179,6 +177,8 @@ class _LocalAuthProxy:
             finally:
                 with suppress(Exception):
                     await upstream.close()
+
+        import uvicorn
 
         config = uvicorn.Config(
             app,
