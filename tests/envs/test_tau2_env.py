@@ -189,6 +189,43 @@ def test_each_conversation_has_its_own_judge(monkeypatch):
     }
 
 
+def test_tool_arguments_must_be_a_json_object():
+    from tau2_env.server.gradio_ui import parse_arguments
+
+    assert parse_arguments('{"user_id": "x"}') == {"user_id": "x"}
+    assert parse_arguments(None) == {}
+    for raw in ["not json", "[]", '"x"', "3"]:
+        assert parse_arguments(raw) is None
+
+
+def test_ui_falls_back_when_no_model_calls_tools(monkeypatch):
+    import io
+
+    import tau2_env.server.gradio_ui as ui
+
+    monkeypatch.setattr(
+        ui.urllib.request, "urlopen", lambda *a, **k: io.BytesIO(b'{"data": []}')
+    )
+    # Uncached, so the test leaves the real model list alone.
+    assert ui.model_choices.__wrapped__() == [(m, m) for m in ui.FALLBACK_MODELS]
+
+
+def test_a_failed_reply_is_not_shown_as_the_customer(env, scripted_user, monkeypatch):
+    from tau2_env.server.gradio_ui import Episode
+
+    scripted_user.append("Hi, my user id is noah_muller_9847.")
+    episode = Episode(env, "2")
+
+    def fail(action):
+        raise TimeoutError("the customer did not answer")
+
+    monkeypatch.setattr(env, "act", fail)
+    episode.act("respond_to_user", {"message": "Anything else?"})
+    agent, failed = episode.events[-2:]
+    assert agent == {"kind": "agent", "text": "Anything else?"}
+    assert failed["kind"] == "tool" and failed["result"].startswith("Error")
+
+
 def test_server_and_ui_start_without_credentials(monkeypatch):
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.setenv("ENABLE_WEB_INTERFACE", "true")
