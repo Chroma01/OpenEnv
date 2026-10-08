@@ -236,7 +236,21 @@ class _LocalAuthProxy:
 
 
 class HFSandboxProvider(ContainerProvider):
-    """Run an OpenEnv server on Hugging Face infrastructure."""
+    """Run an OpenEnv server on Hugging Face infrastructure.
+
+    The server runs in a `huggingface_hub` sandbox pool, which bills its hosts as
+    Hugging Face Jobs. `start_container()` returns a local proxy URL that adds the
+    Hugging Face auth headers, so any `EnvClient` can connect to it unchanged.
+
+    Args:
+        image (`str`):
+            Image to run, for example `hf.co/spaces/openenv/coding_env`. It must
+            provide a `server` command that serves OpenEnv on port 8000.
+        env_vars (`dict[str, str]`, *optional*):
+            Environment variables for the server.
+        flavor (`str`, *optional*, defaults to `"cpu-basic"`):
+            Hugging Face hardware flavor of the sandbox hosts.
+    """
 
     def __init__(
         self,
