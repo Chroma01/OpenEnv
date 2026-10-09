@@ -1019,7 +1019,7 @@ def _remote_files_deleted_by_upload(
 def test_push_deletes_only_stale_environment_files(tmp_path: Path) -> None:
     """Test that push removes files the env no longer ships but keeps user-added and excluded files."""
     _create_test_openenv_env(tmp_path)
-    (tmp_path / ".openenvignore").write_text("data/\n*.bin\n")
+    (tmp_path / ".openenvignore").write_text("data/\n*.bin\nserver/cache\n")
 
     with (
         patch("openenv.cli.commands.push.whoami") as mock_whoami,
@@ -1042,6 +1042,8 @@ def test_push_deletes_only_stale_environment_files(tmp_path: Path) -> None:
             # Excluded from the upload with --exclude.
             "data/train.parquet",
             "server/weights.bin",
+            # Under a directory excluded without a trailing slash.
+            "server/cache/index.json",
             # Matches the default ignore patterns.
             "server/.env",
         ]

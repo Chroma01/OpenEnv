@@ -497,13 +497,17 @@ def _upload_to_hf_space(
     try:
         # Delete remote files the env no longer ships: files at the root or under a top-level
         # directory of the upload that are not uploaded again. Files matching the ignore
-        # patterns and files under other directories (e.g. added by hand on the Space) are kept.
+        # patterns (or under a directory that does) and files under other directories (e.g.
+        # added by hand on the Space) are kept.
         stale_files = [
             path
             for path in api.list_repo_files(repo_id, repo_type="space")
             if not (staging_dir / path).is_file()
             and ("/" not in path or (staging_dir / path.split("/")[0]).is_dir())
-            and not _should_exclude_path(Path(path), ignore_patterns)
+            and not any(
+                _should_exclude_path(part, ignore_patterns)
+                for part in [Path(path), *Path(path).parents[:-1]]
+            )
         ]
         for path in stale_files:
             console.print(
