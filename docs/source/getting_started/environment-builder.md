@@ -298,8 +298,11 @@ Key options:
 - `--hardware/-H`, `--count/-n`, `--create-pr`, `--exclude`: Space hardware, number of Space instances, open a PR instead of pushing, and an ignore file with globs to leave out of the upload
 
 The command validates your `openenv.yaml`, injects Hugging Face frontmatter when needed, and uploads the prepared bundle.
-The Space mirrors the bundle: remote files that are no longer part of it are deleted (`.gitattributes` is kept), and
-local build artifacts (`build/`, `*.egg-info`, `__pycache__`, dotfiles) are never uploaded.
+Remote files the environment no longer ships are deleted: files at the root of the Space or under a top-level
+directory of the bundle (e.g. `server/`) that are not uploaded again. Each one is listed before the upload.
+Files under other directories (e.g. `assets/` added by hand on the Space) and files matching the ignore patterns
+(the defaults and `--exclude`) are kept, so list in `--exclude` any root-level file you manage on the Space directly.
+Local build artifacts (`build/`, `*.egg-info`, `__pycache__`, dotfiles) are never uploaded.
 Space variables and secrets are only applied on direct Hugging Face Space pushes;
 they are not available for `--registry`, and they cannot be staged through
 `--create-pr`.

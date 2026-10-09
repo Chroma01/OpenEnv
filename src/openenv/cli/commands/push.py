@@ -490,14 +490,27 @@ def _upload_to_hf_space(
         "repo_type": "space",
         "create_pr": create_pr,
         "ignore_patterns": ignore_patterns,
-        # Remove remote files that are not in the upload so the Space mirrors the env
-        # (upload_folder never deletes .gitattributes).
-        "delete_patterns": "*",
     }
     if commit_message:
         upload_kwargs["commit_message"] = commit_message
 
     try:
+        # Delete remote files the env no longer ships: files at the root or under a top-level
+        # directory of the upload that are not uploaded again. Files matching the ignore
+        # patterns and files under other directories (e.g. added by hand on the Space) are kept.
+        stale_files = [
+            path
+            for path in api.list_repo_files(repo_id, repo_type="space")
+            if not (staging_dir / path).is_file()
+            and ("/" not in path or (staging_dir / path.split("/")[0]).is_dir())
+            and not _should_exclude_path(Path(path), ignore_patterns)
+        ]
+        for path in stale_files:
+            console.print(
+                f"[bold yellow]Deleting remote file no longer in the env:[/bold yellow] {path}"
+            )
+        upload_kwargs["delete_patterns"] = stale_files
+
         result = api.upload_folder(**upload_kwargs)
         console.print("[bold green]✓[/bold green] Upload completed successfully")
         if create_pr and result is not None and hasattr(result, "pr_url"):
