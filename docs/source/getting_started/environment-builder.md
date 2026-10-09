@@ -29,7 +29,7 @@ openenv build
 
 `openenv build` works for standalone environments and for ones inside the OpenEnv repo, and sets the build arguments accordingly. Useful flags:
 
-- `--tag/-t`: override the default `openenv-<env_name>` tag
+- `--tag/-t`: override the default tag, `openenv-<env_name>` without its `_env` suffix (`openenv-my` for `my_env`)
 - `--build-arg KEY=VALUE`: pass Docker build arguments (repeatable)
 - `--dockerfile/-f` / `--context/-c`: custom locations when experimenting
 - `--no-cache`: force fresh dependency installs
@@ -101,7 +101,7 @@ from my_env import MyAction, MyEnv
 # Pull the Space's image and run it locally (needs Docker)
 client = MyEnv.from_env("my-org/my-env").sync()
 # Or start a container from a local image
-client = MyEnv.from_docker_image("openenv-my_env:latest").sync()
+client = MyEnv.from_docker_image("openenv-my:latest").sync()
 # Or connect to a server that is already running
 client = MyEnv(base_url="http://localhost:8000").sync()
 
@@ -122,7 +122,7 @@ from my_env import MyAction, MyEnv
 
 
 async def main():
-    client = await MyEnv.from_docker_image("openenv-my_env:latest")
+    client = await MyEnv.from_docker_image("openenv-my:latest")
     async with client:
         result = await client.reset()
         result = await client.step(MyAction(message="Hello!"))
