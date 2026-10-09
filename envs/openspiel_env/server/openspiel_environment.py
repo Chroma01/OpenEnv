@@ -135,20 +135,20 @@ class OpenSpielEnvironment(Environment):
         for i, value in enumerate(state):
             if not value:
                 cells.append(
-                    '<span style="background:#ecedef;border-radius:4px"></span>'
+                    '<span style="background:var(--border-color-primary);border-radius:4px"></span>'
                 )
             elif i >= 45:
                 cells.append(
-                    '<span style="background:#0a0a0a;border-radius:4px"></span>'
+                    '<span style="background:var(--body-text-color);border-radius:4px"></span>'
                 )
             else:
                 cells.append(
-                    '<span style="background:#1a7f37;border-radius:50%"></span>'
+                    '<span style="background:var(--color-accent);border-radius:50%"></span>'
                 )
         return (
             '<div role="img" aria-label="Catch board" style="display:inline-grid;'
             "grid-template-columns:repeat(5,26px);grid-auto-rows:26px;gap:3px;padding:10px;"
-            'border:1px solid #ecedef;border-radius:10px;background:#fafafa">'
+            'border:1px solid var(--border-color-primary);border-radius:10px;background:var(--background-fill-secondary)">'
             + "".join(cells)
             + "</div>"
         )
