@@ -31,6 +31,7 @@ The tools call the server's own REST API at `http://localhost:$API_PORT` (defaul
 ```python
 from calendar_env import CalendarEnv
 
+# Alice's token from the seeded demo users (server/data/multi_user_sample.py), not a real credential.
 ALICE_TOKEN = "ya29.A0ARrdaM-k9Vq7GzY2pL4mQf8sN1xT0bR3uHcJWv5yKzP6eF2.qwErTyUIopASDfGhJkLzXcVbNm12_34-56"
 
 with CalendarEnv(base_url="http://localhost:8004", database_id="demo", access_token=ALICE_TOKEN) as env:
