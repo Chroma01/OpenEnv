@@ -188,4 +188,4 @@ openenv push --repo-id openenv/echo_env --create-pr
 - [Build your own environment from scratch](environment-builder.md)
 - [Customize the web UI](../guides/customizing-web-ui.md)
 - [Browse available environments](../environments.md)
-- [End-to-end tutorial](../tutorials/openenv-tutorial.md)
+- [Hello World](../tutorials/openenv-tutorial.md)
