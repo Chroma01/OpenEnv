@@ -52,7 +52,6 @@ class GridWorldEnv(EnvClient[GridWorldAction, GridWorldObservation, State]):
             observation=GridWorldObservation(**data["observation"]),
             reward=data["reward"],
             done=data["done"],
-            info=data.get("info", {}),
         )
 
     def _parse_state(self, data: dict) -> State:
