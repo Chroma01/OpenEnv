@@ -103,7 +103,9 @@ def test_catch_offers_legal_moves_and_a_board():
         ("1 · stay", {"action_id": 1}),
         ("2 · right", {"action_id": 2}),
     ]
-    assert 'aria-label="Catch board"' in env.render_web(obs)
+    board = env.render_web(obs)
+    assert 'aria-label="Catch board"' in board
+    assert "#" not in board  # theme colours only, so it reads in dark mode
 
 
 def _sum_env():
@@ -223,6 +225,22 @@ def test_reset_errors_and_rewards_render_readably():
     assert "-0.46" in html and "0.4599999" not in html
 
 
+class LoginAction(Action):
+    user: str
+    api_key: str
+
+
+def test_secret_arguments_are_masked_in_the_episode():
+    manager = WebInterfaceManager(TinyEnv(), LoginAction, BoardObservation)
+    blocks = build_gradio_app(manager, _extract_action_fields(LoginAction), None, False)
+    step_fn = next(f.fn for f in blocks.fns.values() if f.fn.__name__ == "step_fn")
+
+    outputs = asyncio.run(step_fn([], "ana", "sk-123"))
+
+    assert outputs[6][-1][1] == 'step(user="ana", api_key=***)'
+    assert "sk-123" not in outputs[5]
+
+
 class FailingResetEnv(TinyEnv):
     def reset(self, seed=None, episode_id=None, **kwargs):
         raise RuntimeError("no sandbox")
@@ -243,7 +261,9 @@ def test_failed_reset_keeps_the_episode():
     assert outputs[6] == entries
 
 
-def test_new_env_from_the_template_gets_a_working_playground(tmp_path, monkeypatch):
+def test_new_env_from_the_template_gets_a_working_playground(
+    tmp_path, monkeypatch, request
+):
     """An env scaffolded by `openenv init` needs no extra code for /web to work."""
     from fastapi.testclient import TestClient
     from openenv.cli.__main__ import app as cli
@@ -253,8 +273,12 @@ def test_new_env_from_the_template_gets_a_working_playground(tmp_path, monkeypat
     assert CliRunner().invoke(cli, ["init", "fresh_env"], input="\n").exit_code == 0
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.setenv("ENABLE_WEB_INTERFACE", "true")
-    for module in [m for m in sys.modules if m.startswith("fresh_env")]:
-        monkeypatch.delitem(sys.modules, module)
+
+    def forget_fresh_env():
+        for module in [m for m in sys.modules if m.startswith("fresh_env")]:
+            del sys.modules[module]
+
+    request.addfinalizer(forget_fresh_env)
     server = importlib.import_module("fresh_env.server.app")
     models = importlib.import_module("fresh_env.models")
     environment = importlib.import_module("fresh_env.server.fresh_env_environment")

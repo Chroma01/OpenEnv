@@ -200,6 +200,14 @@ def _params(schema: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any], bool]]:
     ]
 
 
+def _call_args(arguments: Dict[str, Any]) -> str:
+    """Arguments as `name=value` for the episode log, with secrets masked."""
+    return ", ".join(
+        f"{k}={'***' if k.lower().endswith(_SECRET_NAMES) else json.dumps(v)}"
+        for k, v in arguments.items()
+    )
+
+
 def _blank(value: Any) -> bool:
     return value is None or (isinstance(value, str) and not value.strip())
 
@@ -549,12 +557,10 @@ def build_gradio_app(
                                         "tool_name": name,
                                         "arguments": arguments,
                                     }
-                                    args = ", ".join(
-                                        f"{k}={json.dumps(v)}"
-                                        for k, v in arguments.items()
-                                    )
                                     return await run_step(
-                                        action, f"{name}({args})", entries
+                                        action,
+                                        f"{name}({_call_args(arguments)})",
+                                        entries,
                                     )
 
                                 step_inputs = [entries_state, tool_choice, *all_inputs]
@@ -585,12 +591,8 @@ def build_gradio_app(
                                         action = form.values(list(values))
                                     except ValueError as e:
                                         return unchanged(str(e), entries)
-                                    args = ", ".join(
-                                        f"{k}={json.dumps(v)}"
-                                        for k, v in action.items()
-                                    )
                                     return await run_step(
-                                        action, f"step({args})", entries
+                                        action, f"step({_call_args(action)})", entries
                                     )
 
                                 step_inputs = [entries_state, *form.inputs]
@@ -628,8 +630,7 @@ def build_gradio_app(
 
         async def quick_step(entries, actions, choice):
             action = actions[int(choice)]
-            args = ", ".join(f"{k}={json.dumps(v)}" for k, v in action.items())
-            return await run_step(action, f"step({args})", entries)
+            return await run_step(action, f"step({_call_args(action)})", entries)
 
         outputs = [visual, quick, quick_state, result, raw_json, episode, entries_state]
         reset_outputs = [
