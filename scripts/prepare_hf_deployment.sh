@@ -96,9 +96,9 @@ SPACE_REPO_OVERRIDE="${SPACE_REPO_OVERRIDE:-}"
 SPACE_SUFFIX="${SPACE_SUFFIX:-}"
 STAGING_DIR="hf-staging"
 HUB_TAG="openenv"
-# Latest release tag reachable from HEAD (vX.Y.Z -> X.Y.Z); the pyproject
-# version on main is an untagged .devN.
-DEFAULT_OPENENV_VERSION=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
+# Latest stable release tag reachable from HEAD (vX.Y.Z -> X.Y.Z, skipping
+# pre-releases like vX.Y.Zrc1); the pyproject version on main is an untagged .devN.
+DEFAULT_OPENENV_VERSION=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude 'v*[!0-9.]*' 2>/dev/null || true)
 DEFAULT_OPENENV_VERSION="${DEFAULT_OPENENV_VERSION#v}"
 if [ -z "$DEFAULT_OPENENV_VERSION" ]; then
     DEFAULT_OPENENV_VERSION="main"
