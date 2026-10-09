@@ -3,6 +3,8 @@
 """Tests for the default web playground at /web and its environment hooks."""
 
 import asyncio
+import importlib
+import sys
 
 import gradio as gr
 import pytest
@@ -239,3 +241,35 @@ def test_failed_reset_keeps_the_episode():
 
     assert "reset() failed: no sandbox" in outputs[3]
     assert outputs[6] == entries
+
+
+def test_new_env_from_the_template_gets_a_working_playground(tmp_path, monkeypatch):
+    """An env scaffolded by `openenv init` needs no extra code for /web to work."""
+    from fastapi.testclient import TestClient
+    from openenv.cli.__main__ import app as cli
+    from typer.testing import CliRunner
+
+    monkeypatch.chdir(tmp_path)
+    assert CliRunner().invoke(cli, ["init", "fresh_env"], input="\n").exit_code == 0
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setenv("ENABLE_WEB_INTERFACE", "true")
+    for module in [m for m in sys.modules if m.startswith("fresh_env")]:
+        monkeypatch.delitem(sys.modules, module)
+    server = importlib.import_module("fresh_env.server.app")
+    models = importlib.import_module("fresh_env.models")
+    environment = importlib.import_module("fresh_env.server.fresh_env_environment")
+
+    assert TestClient(server.app).get("/web/").status_code == 200
+
+    manager = WebInterfaceManager(
+        environment.FreshEnvironment, models.FreshAction, models.FreshObservation
+    )
+    blocks = build_gradio_app(
+        manager, _extract_action_fields(models.FreshAction), None, False
+    )
+    fns = {f.fn.__name__: f.fn for f in blocks.fns.values()}
+    entries = asyncio.run(fns["reset_env"]([]))[6]
+    outputs = asyncio.run(fns["step_fn"](entries, "hello"))
+
+    assert "hello" in outputs[3]
+    assert outputs[6][-1][1] == 'step(message="hello")'
