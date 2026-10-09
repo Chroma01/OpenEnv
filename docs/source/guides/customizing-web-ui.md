@@ -1,4 +1,4 @@
-# Custom Web UI
+# Customizing the Web UI
 
 The web UI is off by default. When `ENABLE_WEB_INTERFACE=true` (which `openenv push` sets for Spaces), the server serves a default Gradio app at `/web` that follows the loop an agent runs: reset, take an action (for MCP environments, pick a tool and fill its arguments), read the result, the episode so far, and the same call in Python. Environment authors can draw the environment's state and offer one-click actions with two optional methods, or **add** a whole custom tab with a Gradio builder.
 

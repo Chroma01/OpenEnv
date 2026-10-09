@@ -2,8 +2,10 @@
 
 """Tests for the Quick Start markdown shown next to the web interface."""
 
+import re
 import sys
 import textwrap
+from pathlib import Path
 
 import pytest
 from openenv.core.env_server.mcp_types import CallToolAction, CallToolObservation
@@ -128,3 +130,11 @@ def test_env_without_client_package_points_to_readme(monkeypatch):
 
     assert "README" in md
     assert "```python" not in md
+
+
+def test_env_names_match_their_packages():
+    """The Quick Start finds an env's client by the `env_name` it passes to `create_app`."""
+    envs = Path(__file__).parents[2] / "envs"
+    for app in envs.glob("*/server/app.py"):
+        for name in re.findall(r'env_name="([^"]+)"', app.read_text()):
+            assert name == app.parents[1].name, app
