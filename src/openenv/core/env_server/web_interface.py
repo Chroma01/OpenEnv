@@ -15,7 +15,7 @@ import inspect
 import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, get_origin, List, Optional, Tuple, Type
 
 import gradio as gr
 from fastapi import Body, FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect
@@ -30,32 +30,59 @@ from .serialization import deserialize_action_with_preprocessing, serialize_obse
 from .types import Action, EnvironmentMetadata, Observation, State
 
 
-def _find_client_class(package: str) -> Optional[type]:
-    """Return the first `EnvClient` subclass the environment package exports, if any."""
-    import importlib
+_CLIENT_BASES = {"EnvClient", "MCPClientBase", "MCPToolClient"}
 
-    from ..env_client import EnvClient
 
-    try:
-        module = importlib.import_module(package)
-    except ImportError:
-        return None
-    for value in vars(module).values():
-        if (
-            inspect.isclass(value)
-            and issubclass(value, EnvClient)
-            and value.__module__.startswith(package)
-        ):
-            return value
-    return None
+def _read_package(package: str) -> Tuple[Optional[str], set]:
+    """
+    The client class defined in the package's `client.py` and the names its
+    `__init__.py` exports. The files are parsed, not imported, so the server
+    never loads client code.
+    """
+    import ast
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.find_spec(package)
+    if spec is None or not spec.submodule_search_locations:
+        return None, set()
+    root = Path(next(iter(spec.submodule_search_locations)))
+
+    def parse(name: str) -> Optional[ast.Module]:
+        path = root / name
+        return ast.parse(path.read_text()) if path.exists() else None
+
+    client = None
+    tree = parse("client.py")
+    for node in tree.body if tree else []:
+        if isinstance(node, ast.ClassDef):
+            bases = {ast.unparse(b).split("[")[0].split(".")[-1] for b in node.bases}
+            if bases & _CLIENT_BASES:
+                client = node.name
+                break
+
+    exports = set()
+    tree = parse("__init__.py")
+    for node in ast.walk(tree) if tree else []:
+        if isinstance(node, ast.ImportFrom):
+            exports.update(alias.asname or alias.name for alias in node.names)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            exports.add(node.value)
+    return client, exports
 
 
 def _example_value(annotation: Any) -> str:
     """A placeholder literal for a field of the given type."""
-    for kind, literal in ((bool, "False"), (int, "0"), (float, "0.0"), (str, '"..."')):
-        if annotation is kind:
-            return literal
-    return "..."
+    origin = get_origin(annotation) or annotation
+    literals = {
+        bool: "False",
+        int: "0",
+        float: "0.0",
+        str: '"..."',
+        list: "[]",
+        dict: "{}",
+    }
+    return literals.get(origin, "...")
 
 
 def get_quick_start_markdown(
@@ -71,23 +98,21 @@ def get_quick_start_markdown(
     the action's real fields.
     """
     import os
-    import sys
 
     from .mcp_types import CallToolAction
 
     package = (metadata.name if metadata else "env").replace(" ", "_").lower()
-    client_cls = _find_client_class(package)
+    client, exports = _read_package(package)
     space_id = os.environ.get("SPACE_ID")
     space_host = os.environ.get("SPACE_HOST")
     base_url = f"https://{space_host}" if space_host else "http://localhost:8000"
 
-    if client_cls is None:
+    if client is None:
         return (
             "### Connect to this environment\n\n"
             f"The server is at `{base_url}`. See the environment's README for how to connect."
         )
 
-    client = client_cls.__name__
     lines = ["### Connect to this environment", ""]
     if space_id:
         lines += [
@@ -108,7 +133,7 @@ def get_quick_start_markdown(
         after = "Then call a tool with `env.call_tool(name, **arguments)`."
     else:
         action = action_cls.__name__
-        exported = hasattr(sys.modules.get(package), action)
+        exported = action in exports
         action_module = package if exported else action_cls.__module__
         fields = ", ".join(
             f"{name}={_example_value(field.annotation)}"

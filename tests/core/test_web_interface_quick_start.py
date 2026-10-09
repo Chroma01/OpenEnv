@@ -2,77 +2,116 @@
 
 """Tests for the Quick Start markdown shown next to the web interface."""
 
-import importlib
 import sys
 import textwrap
 
 import pytest
-
 from openenv.core.env_server.mcp_types import CallToolAction, CallToolObservation
-from openenv.core.env_server.types import EnvironmentMetadata
+from openenv.core.env_server.types import Action, EnvironmentMetadata
 from openenv.core.env_server.web_interface import get_quick_start_markdown
 
 
-@pytest.fixture
-def demo_env(tmp_path, monkeypatch):
-    """A tiny environment package that exports a client and an action."""
-    package = tmp_path / "demo_env"
+class DemoAction(Action):
+    text: str
+    tokens: list[int]
+    count: int = 1
+
+
+def _write_package(root, name, init):
+    """An environment package with a client module, as the server sees it on disk."""
+    package = root / name
     package.mkdir()
-    (package / "__init__.py").write_text(
+    (package / "client.py").write_text(
         textwrap.dedent(
             """
             from openenv.core.env_client import EnvClient
-            from openenv.core.env_server.types import Action
 
-            class DemoAction(Action):
-                text: str
-                count: int = 1
+            class Helper:
+                pass
 
-            class DemoEnv(EnvClient):
+            class DemoEnv(
+                EnvClient[object, object, object]
+            ):
                 pass
             """
         )
     )
+    (package / "__init__.py").write_text(textwrap.dedent(init))
+
+
+@pytest.fixture
+def demo_env(tmp_path, monkeypatch):
+    _write_package(
+        tmp_path,
+        "demo_env",
+        """
+        from .client import DemoEnv
+        from .models import DemoAction
+        """,
+    )
     monkeypatch.syspath_prepend(str(tmp_path))
-    yield importlib.import_module("demo_env")
-    sys.modules.pop("demo_env", None)
+    monkeypatch.delenv("SPACE_ID", raising=False)
+    monkeypatch.delenv("SPACE_HOST", raising=False)
+    yield "demo_env"
+    for module in [m for m in sys.modules if m.startswith("demo_env")]:
+        sys.modules.pop(module)
 
 
 def _metadata(name):
     return EnvironmentMetadata(name=name, description="")
 
 
-def test_uses_exported_client_and_real_action_fields(demo_env, monkeypatch):
-    monkeypatch.delenv("SPACE_ID", raising=False)
-    monkeypatch.delenv("SPACE_HOST", raising=False)
-
-    md = get_quick_start_markdown(
-        _metadata("demo_env"), demo_env.DemoAction, CallToolObservation
-    )
+def test_uses_the_client_class_and_real_action_fields(demo_env):
+    md = get_quick_start_markdown(_metadata(demo_env), DemoAction, CallToolObservation)
 
     assert "from demo_env import DemoAction, DemoEnv" in md
     assert 'DemoEnv(base_url="http://localhost:8000")' in md
-    assert 'env.step(DemoAction(text="..."))' in md
+    assert 'env.step(DemoAction(text="...", tokens=[]))' in md
     assert "pip install" not in md
+
+
+def test_does_not_import_the_package_or_its_client(demo_env):
+    get_quick_start_markdown(_metadata(demo_env), DemoAction, CallToolObservation)
+
+    assert "demo_env" not in sys.modules
+    assert "demo_env.client" not in sys.modules
+
+
+def test_finds_lazy_exports(tmp_path, monkeypatch):
+    _write_package(
+        tmp_path,
+        "lazy_env",
+        """
+        __all__ = ["DemoEnv", "DemoAction"]
+
+        def __getattr__(name):
+            if name == "DemoEnv":
+                from .client import DemoEnv
+                return DemoEnv
+        """,
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    md = get_quick_start_markdown(
+        _metadata("lazy_env"), DemoAction, CallToolObservation
+    )
+
+    assert "from lazy_env import DemoAction, DemoEnv" in md
 
 
 def test_on_a_space_uses_its_url_and_install_line(demo_env, monkeypatch):
     monkeypatch.setenv("SPACE_ID", "openenv/demo_env")
     monkeypatch.setenv("SPACE_HOST", "openenv-demo-env.hf.space")
 
-    md = get_quick_start_markdown(
-        _metadata("demo_env"), demo_env.DemoAction, CallToolObservation
-    )
+    md = get_quick_start_markdown(_metadata(demo_env), DemoAction, CallToolObservation)
 
     assert "pip install git+https://huggingface.co/spaces/openenv/demo_env" in md
     assert 'DemoEnv(base_url="https://openenv-demo-env.hf.space")' in md
 
 
-def test_mcp_env_lists_tools(demo_env, monkeypatch):
-    monkeypatch.delenv("SPACE_HOST", raising=False)
-
+def test_mcp_env_lists_tools(demo_env):
     md = get_quick_start_markdown(
-        _metadata("demo_env"), CallToolAction, CallToolObservation
+        _metadata(demo_env), CallToolAction, CallToolObservation
     )
 
     assert "from demo_env import DemoEnv" in md
