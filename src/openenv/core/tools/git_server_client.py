@@ -7,6 +7,7 @@ Gitea service, optimized for task-based isolation where multiple environment
 instances share the same Gitea server but have isolated workspaces.
 """
 
+import atexit
 import json
 import os
 import shutil
@@ -97,6 +98,7 @@ class GitServerClient:
         are never touched.
         """
         config_dir = Path(tempfile.mkdtemp(prefix="openenv-git-"))
+        atexit.register(shutil.rmtree, config_dir, ignore_errors=True)
 
         # Git credentials
         git_credentials = (
