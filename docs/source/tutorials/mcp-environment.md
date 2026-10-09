@@ -178,7 +178,7 @@ for sample in eval_dataset:
     env.reset()
 ```
 
-Pair the loop with a scoring function of your choice — the [Reward Design](../guides/rewards.md) guide covers common patterns (test-pass rate, LLM-as-judge quality, compliance gates) — and aggregate across the dataset. The eval harness integration in `src/openenv/core/evals/` is still evolving; until that bridge lands, this plain-Python loop is the canonical pattern.
+Pair the loop with a scoring function of your choice — the [Rewards](../guides/rewards.md) guide covers common patterns (test-pass rate, LLM-as-judge quality, compliance gates) — and aggregate across the dataset. The eval harness integration in `src/openenv/core/evals/` is still evolving; until that bridge lands, this plain-Python loop is the canonical pattern.
 
 ## Building an MCP Environment
 

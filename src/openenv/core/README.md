@@ -5,7 +5,7 @@ An e2e framework for creating, deploying and using isolated execution environmen
 In addition to making it easier for researchers and RL framework writers, we also provide tools for environment creators making it easier for them to create richer environments and make them available over familiar protocols like HTTP and packaged using canonical technologies like docker. Environment creators can use the OpenEnv framework to create environments that are isolated, secure, and easy to deploy and use.
 
 > [!NOTE]
-> OpenEnv is in early development, so APIs may still change. Bug fixes are welcome. For larger changes, open or claim an issue first so the change can be discussed. The [README](../../../README.md#community-support--acknowledgments) lists the technical committee that governs the project, and the [charter](../../../GOVERNANCE.md) explains how it works.
+> OpenEnv is in early development, see the note in the [project README](../../../README.md) before contributing. The [README](../../../README.md#community-support--acknowledgments) lists the technical committee that governs the project, and the [charter](../../../GOVERNANCE.md) explains how it works.
 
 ## Overview
 `openenv.core` provides the foundational building blocks for creating and interacting with containerized environments over HTTP. It enables you to build agent environments that can be deployed as Docker containers and accessed via a simple HTTP API.

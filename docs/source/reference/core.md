@@ -2,9 +2,7 @@
 
 The `openenv.core` package provides the core abstractions for building and running environments. For a walkthrough of building an environment, see [Your First Environment](../guides/first-environment).
 
-If you are trying to understand when OpenEnv exposes the training loop versus direct MCP access, see the [simulation vs production mode](../guides/simulation-vs-production.md) guide.
-
-For a high-level explanation of how MCP-backed environments move through `step()`, `step_async()`, and convenience tool helpers, see the [Simulation vs Production](../guides/simulation-vs-production) guide.
+[Simulation vs Production](../guides/simulation-vs-production) explains when OpenEnv exposes the training loop or direct MCP access, and how MCP tool calls move through `step()`, `step_async()` and `call_tool()`.
 
 For dataset-backed environments that publish enumerable tasks and splits, see the [Task API](../guides/task-api.md) guide.
 

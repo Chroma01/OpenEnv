@@ -74,8 +74,10 @@ Environment clients built on `MCPToolClient` (`EchoEnv`, `FinQAEnv`, …) also h
 | | `step(CallToolAction(...))` | `await client.call_tool(name, **kwargs)` |
 |---|---|---|
 | Goes through | `step()` (simulation) | `/mcp` |
-| Returns | the full `CallToolObservation` (`reward`, `done`, metadata, `obs.result`) | the tool's unwrapped return value |
+| Returns | a `CallToolObservation` (`reward`, `done`, metadata, `obs.result`), wrapped in a `StepResult` over HTTP | the tool's unwrapped return value |
 | On a tool error | an observation you can inspect (`ToolError.error_type`) | raises `RuntimeError` |
+
+Over HTTP, `step()` returns a `StepResult`: the observation is `result.observation` and the reward is `result.reward`. `obs.result` holds the tool's return value as the tool produced it, often a FastMCP `CallToolResult` (`.data`, `.content`, `.structured_content`), or a dict or plain value from other environments.
 
 Use `step()` for training and evaluation, and `call_tool()` when you only need a tool's output. `MCPToolClient` only supports `mode="production"` and raises `ValueError` otherwise. For simulation over HTTP use the environment's `EnvClient` or `GenericEnvClient(base_url=..., mode="simulation")`. `list_tools()` returns an empty list when the request fails.
 

@@ -2,8 +2,8 @@
 
 Choose a learning path from the sidebar:
 
-- **Basics:** start with [Hello World](openenv-tutorial) and build [Your First Environment](../guides/first-environment).
-- **Training:** [the ways to train and the supported frameworks](../guides/training), then train a [reasoning model](end-to-end-walkthrough), play [Wordle](wordle-grpo) or [2048](rl-training-2048) with GRPO, or [collect rollouts for SFT](sft-warmup). Each framework's own examples (TRL, Unsloth, SkyRL, ART, Oumi, torchforge, Miles, …) are listed in [Integrations](../guides/training#integrations).
+- **Basics:** start with [Hello World](openenv-tutorial), build [Your First Environment](../guides/first-environment) and [deploy it](../getting_started/environment-builder).
+- **Training:** [the ways to train and the supported frameworks](../guides/training), then train a [reasoning model](end-to-end-walkthrough), play [Wordle](wordle-grpo) or [2048](rl-training-2048) with GRPO, or [collect rollouts for SFT](sft-warmup). Each framework's own examples (ART, Miles, Oumi, SkyRL, torchforge, TRL, Unsloth, …) are listed in [Integrations](../guides/training#integrations).
 - **Harnesses:** [pick a path](harnesses): train with the trainer's own loop on [BrowserGym](browsergym-harness) (white-box), train real agents through [Harbor](harbor-harness) (black-box), or [evaluate Claude Code inside an environment](claude-code-harness). The [OpenCode](opencode-agent-grpo) and [Pi](pi-agent-grpo) tutorials are deprecated.
 - **Evals:** follow [Evaluating with Environments](evaluation-inspect).
 
