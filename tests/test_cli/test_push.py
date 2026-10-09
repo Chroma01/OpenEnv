@@ -50,7 +50,7 @@ dependencies = ["openenv>=0.2.0"]
     # Create client.py (required by validate_env_structure)
     (env_dir / "client.py").write_text("# Test client\n")
 
-    # Create models.py (required by validate_env_structure)
+    # Create models.py
     (env_dir / "models.py").write_text("# Test models\n")
 
     # Create server directory and files
@@ -469,6 +469,32 @@ def test_push_accepts_dockerfile_at_env_root(tmp_path: Path) -> None:
         files = staged_files[0]
         assert "Dockerfile" in files
         assert "server/Dockerfile" not in files
+
+
+def test_push_accepts_env_without_models(tmp_path: Path) -> None:
+    """Test that push works without models.py, as in MCP environments like echo_env."""
+    _create_test_openenv_env(tmp_path)
+    (tmp_path / "models.py").unlink()
+
+    with (
+        patch("openenv.cli.commands.push.whoami") as mock_whoami,
+        patch("openenv.cli.commands.push.login") as mock_login,
+        patch("openenv.cli.commands.push.HfApi") as mock_hf_api_class,
+    ):
+        mock_whoami.return_value = {"name": "testuser"}
+        mock_login.return_value = None
+        mock_api = MagicMock()
+        mock_hf_api_class.return_value = mock_api
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            result = runner.invoke(app, ["push"])
+        finally:
+            os.chdir(old_cwd)
+
+        assert result.exit_code == 0, result.output
+        assert mock_api.upload_folder.called
 
 
 def test_push_handles_missing_dockerfile(tmp_path: Path) -> None:
