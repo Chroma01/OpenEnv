@@ -223,7 +223,7 @@ def test_prepare_hf_deployment_all_honors_opt_out_but_manual_selection_works(
 
 
 def test_prepare_hf_deployment_defaults_to_latest_release_tag(tmp_path: Path) -> None:
-    """Without --openenv-version, use the latest release tag, not the dev version."""
+    """Without --openenv-version, use the latest stable release tag, not a dev or rc version."""
     repo_root = tmp_path / "openenv"
     scripts_dir = repo_root / "scripts"
     scripts_dir.mkdir(parents=True)
@@ -246,6 +246,10 @@ def test_prepare_hf_deployment_defaults_to_latest_release_tag(tmp_path: Path) ->
     subprocess.run(["git", "add", "."], cwd=repo_root, check=True)
     subprocess.run([*git, "commit", "-q", "-m", "release"], cwd=repo_root, check=True)
     subprocess.run([*git, "tag", "v0.4.2"], cwd=repo_root, check=True)
+    subprocess.run(
+        [*git, "commit", "-q", "--allow-empty", "-m", "rc"], cwd=repo_root, check=True
+    )
+    subprocess.run([*git, "tag", "v0.4.3rc1"], cwd=repo_root, check=True)
 
     env = os.environ.copy()
     env.pop("OPENENV_VERSION", None)
