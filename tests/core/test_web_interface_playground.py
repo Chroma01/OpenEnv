@@ -4,10 +4,21 @@
 
 import gradio as gr
 import pytest
-from openenv.core.env_server.gradio_ui import _result_html, build_gradio_app
+from openenv.core.env_server.gradio_ui import (
+    _description,
+    _Form,
+    _params,
+    _result_html,
+    build_gradio_app,
+)
 from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.mcp_types import CallToolAction, CallToolObservation
-from openenv.core.env_server.types import Action, Observation, State
+from openenv.core.env_server.types import (
+    Action,
+    EnvironmentMetadata,
+    Observation,
+    State,
+)
 from openenv.core.env_server.web_interface import (
     _extract_action_fields,
     WebInterfaceManager,
@@ -123,7 +134,7 @@ def test_tool_without_description_and_json_argument():
     radios = [b for b in blocks.blocks.values() if isinstance(b, gr.Radio)]
     assert ("total", "total") in [c for r in radios for c in r.choices]
     labels = [b.label for b in blocks.blocks.values() if isinstance(b, gr.Textbox)]
-    assert "numbers (array, JSON)" in labels
+    assert "numbers (array, JSON) · required" in labels
 
 
 def test_failed_tool_call_shows_the_error():
@@ -135,3 +146,74 @@ def test_failed_tool_call_shows_the_error():
     html = _result_html(data, step_count=1)
     assert "Error: unknown tool" in html
     assert "null" not in html
+
+
+class RunAction(Action):
+    command: str
+    timeout: float | None = 30.0
+    retries: int | None = None
+    mode: str = "fast"
+    tags: list[str] | None = None
+
+
+def test_params_unwrap_optional_and_keep_defaults():
+    params = {
+        name: (schema, required)
+        for name, schema, required in _params(RunAction.model_json_schema())
+    }
+    assert params["command"] == ({"title": "Command", "type": "string"}, True)
+    assert (
+        params["timeout"][0]["type"] == "number"
+        and params["timeout"][0]["default"] == 30.0
+    )
+    assert params["retries"][0]["type"] == "integer" and not params["retries"][1]
+    assert params["tags"][0]["type"] == "array"
+
+
+def test_form_sends_defaults_skips_empty_optionals_and_requires_fields():
+    with gr.Blocks():
+        form = _Form(_params(RunAction.model_json_schema()))
+    by_name = dict(zip([n for n, _ in form.names], form.inputs))
+    assert isinstance(by_name["retries"], gr.Textbox)  # no default: empty, not 0
+    assert by_name["timeout"].value == 30.0
+    raw = {
+        "command": "ls",
+        "timeout": 30.0,
+        "retries": "",
+        "mode": "fast",
+        "tags": '["a"]',
+    }
+    values = form.values([raw[n] for n, _ in form.names])
+    assert values == {"command": "ls", "timeout": 30.0, "mode": "fast", "tags": ["a"]}
+    raw["command"] = " "
+    with pytest.raises(ValueError, match="Fill in command"):
+        form.values([raw[n] for n, _ in form.names])
+
+
+def test_description_falls_back_to_the_readme():
+    readme = "---\ntitle: X\n---\n# Catch\n\n> [!NOTE]\n> hi\n\nMove the [paddle](x) to catch the ball.\n"
+    meta = EnvironmentMetadata(
+        name="catch_env", description="catch_env environment", readme_content=readme
+    )
+    assert _description(meta) == "Move the paddle to catch the ball."
+    meta = EnvironmentMetadata(
+        name="x", description="A custom description.", readme_content=readme
+    )
+    assert _description(meta) == "A custom description."
+
+
+def test_reset_errors_and_rewards_render_readably():
+    html = _result_html(
+        {
+            "observation": {"metadata": {"error": "E2B_API_KEY is not set"}},
+            "reward": None,
+            "done": True,
+        },
+        0,
+    )
+    assert "Error: E2B_API_KEY is not set" in html
+    assert "–" in html
+    html = _result_html(
+        {"observation": {"value": 1}, "reward": -0.45999999999999996}, 1
+    )
+    assert "-0.46" in html and "0.4599999" not in html
