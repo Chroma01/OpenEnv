@@ -2,6 +2,8 @@
 
 """Tests for the default web playground at /web and its environment hooks."""
 
+import asyncio
+
 import gradio as gr
 import pytest
 from openenv.core.env_server.gradio_ui import (
@@ -217,3 +219,23 @@ def test_reset_errors_and_rewards_render_readably():
         {"observation": {"value": 1}, "reward": -0.45999999999999996}, 1
     )
     assert "-0.46" in html and "0.4599999" not in html
+
+
+class FailingResetEnv(TinyEnv):
+    def reset(self, seed=None, episode_id=None, **kwargs):
+        raise RuntimeError("no sandbox")
+
+
+def test_failed_reset_keeps_the_episode():
+    manager = WebInterfaceManager(FailingResetEnv(), MoveAction, BoardObservation)
+    blocks = build_gradio_app(manager, _extract_action_fields(MoveAction), None, False)
+    reset_env = next(f.fn for f in blocks.fns.values() if f.fn.__name__ == "reset_env")
+    entries = [
+        ["R", "reset()", "new episode"],
+        ["1", "step(action_id=0)", "reward 1.0"],
+    ]
+
+    outputs = asyncio.run(reset_env(entries))
+
+    assert "reset() failed: no sandbox" in outputs[3]
+    assert outputs[6] == entries

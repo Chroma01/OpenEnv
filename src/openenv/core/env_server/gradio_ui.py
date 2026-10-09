@@ -382,7 +382,8 @@ def build_gradio_app(
         try:
             data = await web_manager.reset_environment()
         except Exception as e:
-            return unchanged(f"reset() failed: {e}", [])
+            # Keep the current episode and the last step's result.
+            return (*unchanged(f"reset() failed: {e}", entries), gr.update())
         error = _error(data.get("observation", {}) or {})
         entries = [
             ["R", "reset()", f"error: {_short(error)}" if error else "new episode"]
@@ -393,6 +394,7 @@ def build_gradio_app(
             json.dumps(data, indent=2, default=str),
             _episode_html(entries),
             entries,
+            "",
         )
 
     async def run_step(action: Dict[str, Any], call: str, entries):
@@ -406,7 +408,7 @@ def build_gradio_app(
             data = await web_manager.step_environment(action)
         except Exception as e:
             entries = entries + [
-                [str(steps_in(entries) + 1), call, f"error: {_short(e)}"]
+                [str(steps_in(entries) + 1), call, f"error: {_short(str(e))}"]
             ]
             return (
                 gr.update(),
@@ -616,12 +618,13 @@ def build_gradio_app(
             raw_json,
             episode,
             entries_state,
+            result,
         ]
         # One call to the environment at a time, so a slow reset can't overlap a step.
         busy = dict(concurrency_id="env", concurrency_limit=1, trigger_mode="once")
         reset_btn.click(
             reset_env, inputs=[entries_state], outputs=reset_outputs, **busy
-        ).then(lambda: "", outputs=[result])
+        )
         step_btn.click(step_fn, inputs=step_inputs, outputs=outputs, **busy)
         quick.input(
             quick_step,
