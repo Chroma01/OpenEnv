@@ -26,7 +26,7 @@ The API is the same for every environment:
 - `step(action)` applies an action and returns the next observation, with its `reward` and a `done` flag.
 - `state()` returns episode metadata, such as the episode id and the step count.
 
-Actions, observations and state are Pydantic models, so both sides agree on their fields. [Concepts](../guides/concepts) covers the design in more detail.
+Actions, observations and state are Pydantic models, so both sides agree on their fields. [Core Concepts](../guides/concepts) covers the design in more detail.
 
 ## Setup
 
@@ -50,7 +50,9 @@ def start_server(app, port):
     process = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", app, "--host", "127.0.0.1", "--port", str(port)]
     )
-    for _ in range(100):
+    for _ in range(300):
+        if process.poll() is not None:
+            raise RuntimeError(f"{app} exited, is port {port} already in use?")
         try:
             if requests.get(f"http://127.0.0.1:{port}/health", timeout=1).ok:
                 return process
@@ -167,19 +169,25 @@ class GuessEnvironment(Environment[GuessAction, GuessObservation, State]):
         super().__init__()
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self._target = 0
+        self._done = False
 
     def reset(self, seed=None, episode_id=None, **kwargs) -> GuessObservation:
         self._state = State(episode_id=episode_id or str(uuid4()), step_count=0)
         self._target = random.Random(seed).randint(1, 10)
+        self._done = False
         return GuessObservation(hint="Guess a number between 1 and 10", guesses_left=MAX_GUESSES)
 
     def step(self, action: GuessAction, timeout_s=None, **kwargs) -> GuessObservation:
+        if self._done:
+            return GuessObservation(hint="the episode is over, call reset()", guesses_left=0, done=True)
         self._state.step_count += 1
         guesses_left = MAX_GUESSES - self._state.step_count
         if action.guess == self._target:
+            self._done = True
             return GuessObservation(hint="correct", guesses_left=guesses_left, reward=1.0, done=True)
+        self._done = guesses_left == 0
         hint = "higher" if action.guess < self._target else "lower"
-        return GuessObservation(hint=hint, guesses_left=guesses_left, reward=0.0, done=guesses_left == 0)
+        return GuessObservation(hint=hint, guesses_left=guesses_left, reward=0.0, done=self._done)
 
     @property
     def state(self) -> State:
@@ -278,13 +286,13 @@ guess_server.terminate()
 guess_server.wait()
 ```
 
-You wrote these files by hand to see each part. `openenv init my_env` generates the same layout with a `pyproject.toml`, an `openenv.yaml` manifest and a Dockerfile, ready to build and push to the Hub.
+You wrote these files by hand to see each part. `openenv init my_env` generates the same four parts (with slightly different file names) plus a `pyproject.toml`, an `openenv.yaml` manifest and a Dockerfile, ready to build and push to the Hub.
 
 ## Next steps
 
-- [Your First Environment](../guides/first-environment) and [Packaging & Deploying](../getting_started/environment-builder) take this skeleton to a packaged environment: `openenv init`, Docker, `openenv validate` and `openenv push`.
+- [Your First Environment](../guides/first-environment) and [Deploying an Environment](../getting_started/environment-builder) take this skeleton to a packaged environment: `openenv init`, Docker, `openenv validate` and `openenv push`.
 - [Environments](../environments) lists the environments you can use today.
-- [Building and using MCP environments](mcp-environment) covers tool-based environments like Echo.
+- [MCP Environments](mcp-environment) covers tool-based environments like Echo.
 - [Rewards](../guides/rewards) and [Rubrics](rubrics) cover how environments compute rewards.
 - [Training with OpenEnv](../guides/training) lists every training framework that works with OpenEnv environments, with an example for each.
 
