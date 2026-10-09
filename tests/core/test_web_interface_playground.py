@@ -4,6 +4,7 @@
 
 import asyncio
 import importlib
+import json
 import sys
 
 import gradio as gr
@@ -241,6 +242,31 @@ def test_secret_arguments_are_masked_in_the_episode():
     assert "sk-123" not in outputs[5]
 
 
+def test_enter_in_a_text_field_runs_the_step():
+    manager = WebInterfaceManager(TinyEnv(), RunAction, BoardObservation)
+    blocks = build_gradio_app(manager, _extract_action_fields(RunAction), None, False)
+    step = next(f for f in blocks.fns.values() if f.fn and f.fn.__name__ == "step_fn")
+    textboxes = [id for id, b in blocks.blocks.items() if isinstance(b, gr.Textbox)]
+
+    assert textboxes and {(t, "submit") for t in textboxes} <= set(step.targets)
+
+
+class NoStateEnv(TinyEnv):
+    @property
+    def state(self):
+        raise RuntimeError("no episode")
+
+
+def test_state_shows_nothing_when_unavailable():
+    manager = WebInterfaceManager(NoStateEnv(), MoveAction, BoardObservation)
+    blocks = build_gradio_app(manager, _extract_action_fields(MoveAction), None, False)
+    show_state = next(
+        f.fn for f in blocks.fns.values() if f.fn.__name__ == "show_state"
+    )
+
+    assert show_state() == ""
+
+
 class FailingResetEnv(TinyEnv):
     def reset(self, seed=None, episode_id=None, **kwargs):
         raise RuntimeError("no sandbox")
@@ -293,7 +319,9 @@ def test_new_env_from_the_template_gets_a_working_playground(
     )
     fns = {f.fn.__name__: f.fn for f in blocks.fns.values()}
     entries = asyncio.run(fns["reset_env"]([]))[6]
+    assert json.loads(fns["show_state"]())["step_count"] == 0
     outputs = asyncio.run(fns["step_fn"](entries, "hello"))
 
     assert "hello" in outputs[3]
     assert outputs[6][-1][1] == 'step(message="hello")'
+    assert json.loads(fns["show_state"]())["step_count"] == 1

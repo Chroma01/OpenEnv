@@ -611,6 +611,12 @@ def build_gradio_app(
             with gr.Column(scale=2, min_width=320):
                 with gr.Column(elem_classes="oe-card"):
                     episode = gr.HTML(_episode_html([]))
+                    with gr.Accordion(
+                        "State", open=False, elem_classes="oe-raw oe-json"
+                    ):
+                        state_json = gr.Code(
+                            language="json", interactive=False, show_label=False
+                        )
                 if quick_start_md:
                     with gr.Column(elem_classes="oe-card oe-code"):
                         gr.HTML(
@@ -627,6 +633,12 @@ def build_gradio_app(
                 gr.Markdown(metadata.readme_content)
 
         quick_state = gr.State([])
+
+        def show_state():
+            try:
+                return json.dumps(web_manager.get_state(), indent=2, default=str)
+            except Exception:
+                return ""
 
         async def quick_step(entries, actions, choice):
             action = actions[int(choice)]
@@ -647,13 +659,21 @@ def build_gradio_app(
         busy = dict(concurrency_id="env", concurrency_limit=1, trigger_mode="once")
         reset_btn.click(
             reset_env, inputs=[entries_state], outputs=reset_outputs, **busy
-        )
-        step_btn.click(step_fn, inputs=step_inputs, outputs=outputs, **busy)
+        ).then(show_state, outputs=state_json)
+        # Enter submits a one-line text field, Shift+Enter a multi-line one.
+        gr.on(
+            [step_btn.click]
+            + [i.submit for i in step_inputs if isinstance(i, gr.Textbox)],
+            step_fn,
+            inputs=step_inputs,
+            outputs=outputs,
+            **busy,
+        ).then(show_state, outputs=state_json)
         quick.input(
             quick_step,
             inputs=[entries_state, quick_state, quick],
             outputs=outputs,
             **busy,
-        )
+        ).then(show_state, outputs=state_json)
 
     return demo
