@@ -422,7 +422,8 @@ def build_model_step(
     handles the sync/async adaptation and tool dict shape.
     """
     # Async clients (e.g. `AsyncOpenAI`) bind their connection pool to the loop of
-    # the first request, so every call must run on the same long-lived loop.
+    # the first request, so every call must run on the same long-lived loop. The loop
+    # lives as long as the process, so build one model step per run, not per episode.
     loop = asyncio.new_event_loop()
     threading.Thread(target=loop.run_forever, daemon=True).start()
 
