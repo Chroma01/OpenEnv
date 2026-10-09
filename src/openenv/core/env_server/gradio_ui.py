@@ -223,9 +223,7 @@ def _param_input(
             lambda v: None if _blank(v) else v,
         )
     if kind == "boolean":
-        return gr.Checkbox(label=label, value=bool(default), info=info), lambda v: bool(
-            v
-        )
+        return gr.Checkbox(label=label, value=bool(default), info=info), bool
     if kind in ("integer", "number"):
         cast = int if kind == "integer" else float
 
@@ -383,13 +381,34 @@ def build_gradio_app(
             data = await web_manager.reset_environment()
         except Exception as e:
             # Keep the current episode and the last step's result.
-            return (*unchanged(f"reset() failed: {e}", entries), gr.update())
+            (
+                visual_update,
+                quick_update,
+                actions,
+                result_html,
+                raw,
+                episode_html,
+                kept,
+            ) = unchanged(f"reset() failed: {e}", entries)
+            return (
+                visual_update,
+                quick_update,
+                actions,
+                result_html,
+                raw,
+                episode_html,
+                kept,
+                gr.update(),
+            )
         error = _error(data.get("observation", {}) or {})
         entries = [
             ["R", "reset()", f"error: {_short(error)}" if error else "new episode"]
         ]
+        visual_update, quick_update, actions = render(data)
         return (
-            *render(data),
+            visual_update,
+            quick_update,
+            actions,
             _result_html(data, 0),
             json.dumps(data, indent=2, default=str),
             _episode_html(entries),
@@ -429,8 +448,11 @@ def build_gradio_app(
             else f"reward {data.get('reward')}"
         )
         entries = entries + [[str(steps_in(entries) + 1), call, _short(summary)]]
+        visual_update, quick_update, actions = render(data)
         return (
-            *render(data),
+            visual_update,
+            quick_update,
+            actions,
             _result_html(data, steps_in(entries)),
             json.dumps(data, indent=2, default=str),
             _episode_html(entries),
