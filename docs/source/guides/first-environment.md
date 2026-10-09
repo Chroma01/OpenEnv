@@ -2,7 +2,7 @@
 
 This walkthrough builds an environment from scratch: scaffold it with the `openenv` CLI, write the models, the environment logic, the server and the client, run it locally, then deploy it to a Hugging Face Space. For what each piece is, see [Core Concepts](concepts.md).
 
-You need Python 3.10+, [`uv`](https://github.com/astral-sh/uv) and the OpenEnv library (`pip install openenv`). Docker is only needed to build the image locally.
+You need Python 3.10+, [`uv`](https://github.com/astral-sh/uv) and the OpenEnv library (`pip install openenv`). Docker is only needed to build the image or run it locally (`openenv build`, `from_env` and `from_docker_image`).
 
 ## 1. Scaffold with `openenv init`
 
@@ -207,7 +207,34 @@ You get a playground to reset the environment, fill an action form, step and rea
 
 ### Validate
 
-`openenv.yaml` declares the contract your environment promises (reward range, resources, capabilities). Check it before deploying:
+`openenv.yaml` is the environment's manifest. It names the app and port the server runs, and declares the contract your environment promises (reward range, resources, capabilities). The template generates:
+
+```yaml
+spec_version: 1
+name: my_env
+version: 0.1.0
+type: space
+runtime: fastapi
+app: server.app:app
+port: 8000
+validation:
+  reward:
+    range: [0.0, 1.0]
+    oracle_tolerance: 0.0
+    floor_margin: 0.1
+  resources:
+    cpu: 1.0
+    memory_mb: 1024
+    disk_mb: 512
+    episode_timeout_s: 60.0
+  capabilities:
+    verifier:
+      kind: reward_channel
+  types:
+    tags: [demo]
+```
+
+Check it before deploying:
 
 ```bash
 openenv validate --level static --skip-build
