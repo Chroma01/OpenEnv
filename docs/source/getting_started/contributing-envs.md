@@ -1,4 +1,4 @@
-# Contributing to Hugging Face
+# Contributing Environments
 
 OpenEnv environments are designed to be shared. The `openenv` CLI provides first-class
 commands for publishing, forking, and contributing to environments hosted as
