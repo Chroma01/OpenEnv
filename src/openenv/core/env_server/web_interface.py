@@ -11,6 +11,7 @@ option (e.g. openenv push --enable-interface) or ENABLE_WEB_INTERFACE env var.
 from __future__ import annotations
 
 import asyncio
+import functools
 import inspect
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -180,39 +181,29 @@ def load_environment_metadata(
     Load environment metadata including README content.
 
     Args:
-        env: The environment instance, class, or factory function. If a class or
-            function, it is used as a factory and instance methods are not called.
-            If an instance, `get_metadata()` is called if available.
+        env: The environment instance or factory (class, function or
+            `functools.partial`). A factory is not instantiated. If an instance,
+            `get_metadata()` is called.
         env_name (`str`, *optional*):
             Optional environment name for README file lookup.
 
     Returns:
         `EnvironmentMetadata` with loaded information.
     """
-    import inspect
-
-    # Determine what type of env we received:
-    # 1. A class (used as factory) - e.g., PythonCodeActEnv
-    # 2. A function (factory function) - e.g., create_chat_environment
-    # 3. An actual instance - e.g., SnakeEnvironment()
-    is_class = inspect.isclass(env)
-    is_function = inspect.isfunction(env) or inspect.ismethod(env)
-    is_factory = is_class or is_function
-
-    # Try to get metadata from environment if it's an instance with get_metadata
-    if not is_factory and hasattr(env, "get_metadata"):
+    # An Environment instance provides its own metadata. Anything else is a factory:
+    # a class (e.g. PythonCodeActEnv), a factory function (e.g.
+    # create_chat_environment) or a `functools.partial` of either.
+    if isinstance(env, Environment):
         return env.get_metadata()
 
+    if isinstance(env, functools.partial):
+        env = env.func
+
     # Determine the class name for default metadata
-    if is_class:
-        # env is the class itself
+    if inspect.isclass(env):
         class_name = env.__name__
-    elif is_function:
-        # env is a factory function - use its name or derive from env_name
-        class_name = env_name or env.__name__
     else:
-        # env is an instance
-        class_name = env.__class__.__name__
+        class_name = env_name or env.__name__
 
     # Default metadata
     metadata = EnvironmentMetadata(
@@ -306,13 +297,8 @@ class WebInterfaceManager:
         observation_cls: Type[Observation],
         metadata: Optional[EnvironmentMetadata] = None,
     ):
-        import inspect
-
-        # If env is a class or factory function, instantiate it
-        if inspect.isclass(env) or inspect.isfunction(env):
-            self.env = env()
-        else:
-            self.env = env
+        # Anything that is not an Environment instance is a factory, instantiate it
+        self.env = env if isinstance(env, Environment) else env()
         self.action_cls = action_cls
         self.observation_cls = observation_cls
         self.metadata = metadata or EnvironmentMetadata(
