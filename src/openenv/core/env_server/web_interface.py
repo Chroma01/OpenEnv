@@ -15,7 +15,7 @@ import inspect
 import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, get_origin, List, Optional, Tuple, Type
 
 import gradio as gr
 from fastapi import Body, FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect
@@ -30,42 +30,59 @@ from .serialization import deserialize_action_with_preprocessing, serialize_obse
 from .types import Action, EnvironmentMetadata, Observation, State
 
 
-# Quick Start markdown template; placeholders match init suffixes (__ENV_NAME__, __ENV_CLASS_NAME__*).
-DEFAULT_QUICK_START_MARKDOWN = """
-### Connect to this environment
+_CLIENT_BASES = {"EnvClient", "MCPClientBase", "MCPToolClient"}
 
-Connect from Python using `__ENV_CLASS_NAME__Env`:
 
-```python
-from __ENV_NAME__ import __ENV_CLASS_NAME__Action, __ENV_CLASS_NAME__Env
+def _read_package(package: str) -> Tuple[Optional[str], set]:
+    """
+    The client class defined in the package's `client.py` and the names its
+    `__init__.py` exports. The files are parsed, not imported, so the server
+    never loads client code.
+    """
+    import ast
+    import importlib.util
+    from pathlib import Path
 
-with __ENV_CLASS_NAME__Env.from_env("<SPACE_ID>").sync() as env:
-    result = env.step(__ENV_CLASS_NAME__Action(message="..."))
-```
+    spec = importlib.util.find_spec(package)
+    if spec is None or not spec.submodule_search_locations:
+        return None, set()
+    root = Path(next(iter(spec.submodule_search_locations)))
 
-Or connect directly to a running server:
+    def parse(name: str) -> Optional[ast.Module]:
+        path = root / name
+        return ast.parse(path.read_text()) if path.exists() else None
 
-```python
-env = __ENV_CLASS_NAME__Env(base_url="http://localhost:8000")
-```
+    client = None
+    tree = parse("client.py")
+    for node in tree.body if tree else []:
+        if isinstance(node, ast.ClassDef):
+            bases = {ast.unparse(b).split("[")[0].split(".")[-1] for b in node.bases}
+            if bases & _CLIENT_BASES:
+                client = node.name
+                break
 
-### Contribute to this environment
+    exports = set()
+    tree = parse("__init__.py")
+    for node in ast.walk(tree) if tree else []:
+        if isinstance(node, ast.ImportFrom):
+            exports.update(alias.asname or alias.name for alias in node.names)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            exports.add(node.value)
+    return client, exports
 
-Submit improvements via pull request on the Hugging Face Hub.
 
-```bash
-openenv fork <SPACE_ID> --repo-id <your-username>/<your-repo-name>
-```
-
-Then make your changes and submit a pull request:
-
-```bash
-cd <forked-repo>
-openenv push <SPACE_ID> --create-pr
-```
-
-For more information, see the [OpenEnv documentation](https://huggingface.co/docs/openenv).
-"""
+def _example_value(annotation: Any) -> str:
+    """A placeholder literal for a field of the given type."""
+    origin = get_origin(annotation) or annotation
+    literals = {
+        bool: "False",
+        int: "0",
+        float: "0.0",
+        str: '"..."',
+        list: "[]",
+        dict: "{}",
+    }
+    return literals.get(origin, "...")
 
 
 def get_quick_start_markdown(
@@ -74,35 +91,80 @@ def get_quick_start_markdown(
     observation_cls: Type[Observation],
 ) -> str:
     """
-    Build Quick Start markdown with class names replaced from current env (init-style suffixes).
+    Build the Quick Start markdown shown next to the web interface.
 
-    Uses the same placeholder names as the init template so that __ENV_CLASS_NAME__Env,
-    __ENV_CLASS_NAME__Action, __ENV_CLASS_NAME__Observation and __ENV_NAME__ are
-    replaced with the actual class/package names.
+    The client class is the one the environment package exports, the URL is the
+    Space's own when running on Hugging Face Spaces, and the example action uses
+    the action's real fields.
     """
     import os
 
-    # Prefix from action class (e.g. EchoAction -> Echo)
-    action_name = getattr(action_cls, "__name__", "Action")
-    if action_name.endswith("Action"):
-        prefix = action_name[: -len("Action")]
+    from .mcp_types import CallToolAction
+
+    package = (metadata.name if metadata else "env").replace(" ", "_").lower()
+    client, exports = _read_package(package)
+    space_id = os.environ.get("SPACE_ID")
+    space_host = os.environ.get("SPACE_HOST")
+    base_url = f"https://{space_host}" if space_host else "http://localhost:8000"
+
+    if client is None:
+        return (
+            "### Connect to this environment\n\n"
+            f"The server is at `{base_url}`. See the environment's README for how to connect."
+        )
+
+    lines = ["### Connect to this environment", ""]
+    if space_id:
+        lines += [
+            "```bash",
+            f"pip install git+https://huggingface.co/spaces/{space_id}",
+            "```",
+            "",
+        ]
+
+    if issubclass(action_cls, CallToolAction):
+        code = [
+            f"from {package} import {client}",
+            "",
+            f'with {client}(base_url="{base_url}").sync() as env:',
+            "    env.reset()",
+            "    print([tool.name for tool in env.list_tools()])",
+        ]
+        after = "Then call a tool with `env.call_tool(name, **arguments)`."
     else:
-        prefix = action_name.replace("Action", "").strip() or "Env"
+        action = action_cls.__name__
+        exported = action in exports
+        action_module = package if exported else action_cls.__module__
+        fields = ", ".join(
+            f"{name}={_example_value(field.annotation)}"
+            for name, field in action_cls.model_fields.items()
+            if field.is_required() and name != "metadata"
+        )
+        code = [
+            *(
+                [f"from {package} import {action}, {client}"]
+                if exported
+                else [
+                    f"from {action_module} import {action}",
+                    f"from {package} import {client}",
+                ]
+            ),
+            "",
+            f'with {client}(base_url="{base_url}").sync() as env:',
+            "    result = env.reset()",
+            f"    result = env.step({action}({fields}))",
+            "    print(result.observation, result.reward)",
+        ]
+        after = ""
 
-    env_client_name = f"{prefix}Env"
-    obs_name = getattr(observation_cls, "__name__", "Observation")
-    pkg_name = (metadata.name if metadata else "env").replace(" ", "_").lower()
-
-    space_id = os.environ.get("SPACE_ID", "<hf-username>/<hf-repo-name>")
-
-    content = DEFAULT_QUICK_START_MARKDOWN
-    content = content.replace("__ENV_CLASS_NAME__Env", env_client_name)
-    content = content.replace("__ENV_CLASS_NAME__Action", action_name)
-    content = content.replace("__ENV_CLASS_NAME__Observation", obs_name)
-    content = content.replace("__ENV_CLASS_NAME__", prefix)
-    content = content.replace("__ENV_NAME__", pkg_name)
-    content = content.replace("<SPACE_ID>", space_id)
-    return content.strip()
+    lines += ["```python", *code, "```"]
+    if after:
+        lines += ["", after]
+    lines += [
+        "",
+        "More in the [OpenEnv documentation](https://huggingface.co/docs/openenv).",
+    ]
+    return "\n".join(lines)
 
 
 def load_environment_metadata(
