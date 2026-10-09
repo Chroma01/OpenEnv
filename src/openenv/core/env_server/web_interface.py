@@ -104,6 +104,12 @@ def get_quick_start_markdown(
 
     package = (metadata.name if metadata else "env").replace(" ", "_").lower()
     client, exports = _read_package(package)
+    if client is None:
+        # The env name can differ from its package (reasoning_gym vs reasoning_gym_env).
+        module_root = action_cls.__module__.split(".")[0]
+        if module_root not in (package, "openenv", "models", "server"):
+            package = module_root
+            client, exports = _read_package(package)
     space_id = os.environ.get("SPACE_ID")
     space_host = os.environ.get("SPACE_HOST")
     base_url = f"https://{space_host}" if space_host else "http://localhost:8000"
@@ -218,20 +224,13 @@ def _load_readme_from_filesystem(env_name: Optional[str]) -> Optional[str]:
     """
     Load README content from the filesystem.
 
-    Tries multiple locations in order: the container filesystem at `/app/README.md`,
-    the path given by the `ENV_README_PATH` environment variable, and the local
-    development path `src/envs/{env_name}/README.md`.
+    Tries multiple locations in order: the path given by the `ENV_README_PATH`
+    environment variable, the repository path `envs/{env_name}/README.md`, and the
+    container paths `/app/env/README.md` (where Space images copy the environment)
+    and `/app/README.md`.
     """
     import os
     from pathlib import Path
-
-    # Try container filesystem first
-    container_readme = Path("/app/README.md")
-    if container_readme.exists():
-        try:
-            return container_readme.read_text(encoding="utf-8")
-        except Exception:
-            pass
 
     # Try environment variable path
     custom_path = os.environ.get("ENV_README_PATH")
@@ -241,12 +240,12 @@ def _load_readme_from_filesystem(env_name: Optional[str]) -> Optional[str]:
         except Exception:
             pass
 
-    # Try local development path
-    if env_name:
-        local_readme = Path(f"src/envs/{env_name}/README.md")
-        if local_readme.exists():
+    candidates = [Path(f"envs/{env_name}/README.md")] if env_name else []
+    candidates += [Path("/app/env/README.md"), Path("/app/README.md")]
+    for readme in candidates:
+        if readme.exists():
             try:
-                return local_readme.read_text(encoding="utf-8")
+                return readme.read_text(encoding="utf-8")
             except Exception:
                 pass
 
@@ -695,11 +694,10 @@ def _build_gradio_blocks(
         tab_blocks = [default_blocks, custom_blocks]
         tab_labels = ["Playground", custom_tab_name]
 
-    return gr.TabbedInterface(
-        tab_blocks,
-        tab_names=tab_labels,
-        title=display_title,
-    )
+    # The playground has its own header, so the title only names the browser tab.
+    tabbed = gr.TabbedInterface(tab_blocks, tab_names=tab_labels)
+    tabbed.title = display_title
+    return tabbed
 
 
 def _is_chat_env(action_cls: Type[Action]) -> bool:
