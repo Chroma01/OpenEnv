@@ -1,4 +1,4 @@
-# Harbor provider qualification
+# Harbor Qualification
 
 An installed adapter is not evidence that a harness works with a given model provider. Qualify the harness version, model route, sandbox, capture implementation and task set together.
 

@@ -1,4 +1,4 @@
-# Discover environments before running them
+# Catalog Discovery
 
 `openenv catalog` and `openenv discover` find an environment for a task from committed metadata only. They never install, import, pull or run candidate environments. To load an environment you already know, use [`AutoEnv`](auto-discovery) instead.
 
@@ -153,7 +153,8 @@ Preserve both rather than reconstructing the card from search snippets.
 | `declaration.schema.json` | Producer-side `discovery.json` input, not a discovered resource |
 
 The schema `$id` is an identifier, not an instruction to fetch it or a
-guarantee that a draft is published there. Loading these self-contained schemas
+guarantee that a draft is published there. Pin the agreed schema/profile
+revision during review. Loading these self-contained schemas
 does not require fetching candidate resource URLs.
 
 ### Consumer validation
@@ -213,7 +214,8 @@ mapping.
 Publish the complete generated JSON through an owner-controlled, versioned
 metadata channel. Consumers pin the profile they understand and inspect the
 whole `entries[].data` card. A third-party adapter may extract entries but must
-retain source, path, revision and the snapshot reference.
+retain source, path, revision and the snapshot reference. Publication alone does
+not guarantee admission to or indexing by any finder.
 
 The `Discovery catalog` workflow generates a revision-named GitHub Actions
 artifact from the checked-out source, using the hosting GitHub domain and
@@ -224,4 +226,5 @@ revision.
 `compare_catalogs(previous, current)` distinguishes added listings, withdrawn
 listings, superseded revision cards and corrected metadata for the same
 revision. Both inputs must be complete snapshots of the same publisher, source
-and inventory scope. Failed reads cannot authorize removal.
+and inventory scope. Failed reads cannot authorize removal. Historical snapshots
+remain usable as explicit historical metadata.

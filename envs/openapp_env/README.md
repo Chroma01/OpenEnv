@@ -124,8 +124,7 @@ To change the other settings, construct `OpenAppEnvironment` (in `server/openapp
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `openapps_url` | `OPENAPPS_URL`, else `http://localhost:<web_app_port>` | URL of the OpenApps server |
-| `web_app_port` | `5001` | OpenApps port when no URL is given |
+| `openapps_url` | `OPENAPPS_URL` | URL of the OpenApps server. `reset()` fails if `OPENAPPS_URL` is not set |
 | `headless` | `True` | Run the browser headless |
 | `task_name` | `None` | Task name, reported in `task_info` |
 | `apps_config` | `{}` | App configuration |
