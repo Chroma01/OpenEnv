@@ -20,7 +20,7 @@ from .._cli_utils import _extract_hf_username, console, validate_env_structure
 app = typer.Typer(help="Push an OpenEnv environment to Hugging Face Spaces")
 
 
-DEFAULT_PUSH_IGNORE_PATTERNS = [".*", "__pycache__", "*.pyc"]
+DEFAULT_PUSH_IGNORE_PATTERNS = [".*", "__pycache__", "*.pyc", "build/", "*.egg-info"]
 
 
 def _format_kv_entry_for_error(entry: str, *, flag: str) -> str:
@@ -490,6 +490,9 @@ def _upload_to_hf_space(
         "repo_type": "space",
         "create_pr": create_pr,
         "ignore_patterns": ignore_patterns,
+        # Remove remote files that are not in the upload so the Space mirrors the env
+        # (upload_folder never deletes .gitattributes).
+        "delete_patterns": "*",
     }
     if commit_message:
         upload_kwargs["commit_message"] = commit_message
