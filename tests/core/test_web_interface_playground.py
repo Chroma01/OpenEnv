@@ -4,7 +4,6 @@
 
 import gradio as gr
 import pytest
-
 from openenv.core.env_server.gradio_ui import _result_html, build_gradio_app
 from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.mcp_types import CallToolAction, CallToolObservation
@@ -90,3 +89,49 @@ def test_catch_offers_legal_moves_and_a_board():
         ("2 · right", {"action_id": 2}),
     ]
     assert 'aria-label="Catch board"' in env.render_web(obs)
+
+
+def _sum_env():
+    from fastmcp import FastMCP
+    from openenv.core.env_server.mcp_environment import MCPEnvironment
+
+    mcp = FastMCP("sum_env")
+
+    @mcp.tool
+    def total(numbers: list[int]) -> int:
+        return sum(numbers)
+
+    class SumEnv(MCPEnvironment):
+        def reset(self, seed=None, episode_id=None, **kwargs):
+            return Observation()
+
+        def _step_impl(self, action, timeout_s=None, **kwargs):
+            return Observation()
+
+        @property
+        def state(self):
+            return State()
+
+    return SumEnv(mcp)
+
+
+def test_tool_without_description_and_json_argument():
+    manager = WebInterfaceManager(_sum_env(), CallToolAction, CallToolObservation)
+    blocks = build_gradio_app(
+        manager, _extract_action_fields(CallToolAction), None, False
+    )
+    radios = [b for b in blocks.blocks.values() if isinstance(b, gr.Radio)]
+    assert ("total", "total") in [c for r in radios for c in r.choices]
+    labels = [b.label for b in blocks.blocks.values() if isinstance(b, gr.Textbox)]
+    assert "numbers (array, JSON)" in labels
+
+
+def test_failed_tool_call_shows_the_error():
+    data = {
+        "observation": {"result": None, "error": {"message": "unknown tool"}},
+        "reward": None,
+        "done": False,
+    }
+    html = _result_html(data, step_count=1)
+    assert "Error: unknown tool" in html
+    assert "null" not in html

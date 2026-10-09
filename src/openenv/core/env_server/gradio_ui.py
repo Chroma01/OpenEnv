@@ -49,13 +49,22 @@ def _short(value: Any, limit: int = 80) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def _output(obs: Dict[str, Any]) -> Any:
+    """What a tool call returned: its data, or the error message when it failed."""
+    error = obs.get("error")
+    if error:
+        return error.get("message", error) if isinstance(error, dict) else error
+    result = obs.get("result")
+    return result.get("data", result) if isinstance(result, dict) else result
+
+
 def _result_html(data: Dict[str, Any], step_count: int) -> str:
     """The step's output, then reward, done and step."""
     obs = data.get("observation", {}) or {}
-    if "result" in obs:
-        result = obs["result"]
-        main = result.get("data", result) if isinstance(result, dict) else result
-        body = f'<pre class="oe-output">{html.escape(_short(main, 2000))}</pre>'
+    if obs.get("error"):
+        body = f'<pre class="oe-output">Error: {html.escape(_short(_output(obs), 2000))}</pre>'
+    elif "result" in obs:
+        body = f'<pre class="oe-output">{html.escape(_short(_output(obs), 2000))}</pre>'
     else:
         rows = "".join(
             f"<div><span>{html.escape(k)}</span><code>{html.escape(_short(v))}</code></div>"
@@ -94,9 +103,24 @@ def _list_tools(env: Any) -> List[Any]:
     return list(env.step(ListToolsAction()).tools)
 
 
+def _tool_label(tool: Any) -> str:
+    """The tool's name and the first line of its description, if it has one."""
+    first_line = (tool.description or "").strip().split("\n")[0]
+    return f"{tool.name}: {first_line}" if first_line else tool.name
+
+
+def _is_json(schema: Dict[str, Any]) -> bool:
+    """Arguments typed as arrays or objects are entered as JSON."""
+    return schema.get("type") in ("array", "object")
+
+
 def _input_for(name: str, schema: Dict[str, Any], label_suffix: str = "") -> Any:
     kind = schema.get("type", "string")
-    label = f"{name} ({kind}){label_suffix}"
+    label = (
+        f"{name} ({kind}, JSON)"
+        if _is_json(schema)
+        else f"{name} ({kind}){label_suffix}"
+    )
     if "enum" in schema:
         return gr.Dropdown(choices=schema["enum"], label=label)
     if kind == "boolean":
@@ -186,8 +210,9 @@ def build_gradio_app(
             raise gr.Error(str(e))
         count = web_manager.episode_state.step_count
         obs = data.get("observation", {}) or {}
-        result = obs.get("result", {})
-        summary = result.get("data", result) if isinstance(result, dict) else result
+        summary = _output(obs)
+        if obs.get("error"):
+            summary = f"error: {summary}"
         entries = entries + [
             [str(count), call, _short(summary or f"reward {data.get('reward')}")]
         ]
@@ -247,7 +272,7 @@ def build_gradio_app(
                                 tool_choice = gr.Radio(
                                     choices=[
                                         (
-                                            f"{t.name}: {t.description.strip().splitlines()[0]}",
+                                            _tool_label(t),
                                             t.name,
                                         )
                                         for t in tools
@@ -265,7 +290,7 @@ def build_gradio_app(
                                             "properties", {}
                                         ).items():
                                             arg_inputs.append(_input_for(arg, schema))
-                                            arg_keys.append((tool.name, arg))
+                                            arg_keys.append((tool.name, arg, schema))
                                     groups.append(group)
                                 tool_choice.change(
                                     lambda name: [
@@ -276,11 +301,20 @@ def build_gradio_app(
                                 )
 
                                 async def step_fn(entries, name, *values):
-                                    arguments = {
-                                        arg: value
-                                        for (tool, arg), value in zip(arg_keys, values)
-                                        if tool == name and value not in (None, "")
-                                    }
+                                    arguments = {}
+                                    for (tool, arg, schema), value in zip(
+                                        arg_keys, values
+                                    ):
+                                        if tool != name or value in (None, ""):
+                                            continue
+                                        if _is_json(schema):
+                                            try:
+                                                value = json.loads(value)
+                                            except json.JSONDecodeError as e:
+                                                raise gr.Error(
+                                                    f"{arg} must be JSON: {e}"
+                                                )
+                                        arguments[arg] = value
                                     action = {
                                         "type": "call_tool",
                                         "tool_name": name,
